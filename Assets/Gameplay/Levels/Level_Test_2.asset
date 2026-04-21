@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 06064f226543e8940aabe15d3b3ffd25, type: 3}
+  m_Name: Level_Test_2
+  m_EditorClassIdentifier: 
+  levelId: level_test_2
+  levelIndex: 1
+  boardWidth: 4
+  boardHeight: 4
+  moveLimit: 10
+  goalTileId: goal
+  goalX: 3
+  goalY: 3
+  initialTileLayout:
+  - tileId: goal
+    x: 1
+    y: 0
+  - tileId: c
+    x: 0
+    y: 1
+  - tileId: d
+    x: 2
+    y: 1
