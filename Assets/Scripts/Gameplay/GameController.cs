@@ -61,8 +61,7 @@ namespace PuzzleDungeon.Gameplay
             EnsureEventSystemWithInputSystem();
             EnsureUiRoots();
 
-            int savedIndex = saveService.GetCurrentLevelIndex();
-            LoadLevel(Mathf.Clamp(savedIndex, 0, levels.Length - 1), true);
+            LoadLevel(ResolveStartupLevelIndex(), true);
         }
 
         /// <summary>
@@ -77,6 +76,7 @@ namespace PuzzleDungeon.Gameplay
 
             if (!gameRules.CanApplyMove(boardState))
             {
+                LogInteractionBlockedReason();
                 UpdateMoveCounterText();
                 UpdateTerminalPopups();
                 return;
@@ -104,21 +104,31 @@ namespace PuzzleDungeon.Gameplay
 
             if (!boardState.IsCellEmpty(clickedPosition))
             {
-                selectedPosition = clickedPosition;
-                RefreshBoardVisuals();
+                // Invalid move by design: occupied destinations are rejected and selection remains unchanged.
+                MoveResult occupiedCellResult = gameRules.TryMove(boardState, source, clickedPosition);
+                LogInvalidMoveAttempt(source, clickedPosition, occupiedCellResult);
+                UpdateMoveCounterText();
+                UpdateTerminalPopups();
                 return;
             }
 
             // Route all move execution through GameRules to preserve gameplay authority in core logic.
             MoveResult result = gameRules.TryMove(boardState, source, clickedPosition);
 
-            if (result.IsSuccess)
+            if (!result.IsSuccess)
             {
-                selectedPosition = null;
+                LogInvalidMoveAttempt(source, clickedPosition, result);
+                UpdateMoveCounterText();
+                UpdateTerminalPopups();
+                return;
             }
+
+            selectedPosition = null;
+            LogSuccessfulMove(source, clickedPosition, result);
 
             if (result.IsWin)
             {
+                saveService.SetBestMoveCount(levels[currentLevelIndex].LevelId, result.MovesUsed);
                 saveService.SetUnlockedLevelIndex(currentLevelIndex + 1);
                 saveService.Flush();
             }
@@ -128,11 +138,56 @@ namespace PuzzleDungeon.Gameplay
             UpdateTerminalPopups();
         }
 
+        private void LogInteractionBlockedReason()
+        {
+            if (boardState == null || gameRules == null)
+            {
+                return;
+            }
+
+            if (gameRules.HasWon(boardState))
+            {
+                Debug.LogWarning("Interaction ignored: level is already completed.");
+                return;
+            }
+
+            if (gameRules.HasLost(boardState))
+            {
+                Debug.LogWarning("Interaction ignored: move limit reached.");
+                return;
+            }
+
+            Debug.LogWarning("Interaction ignored: moves are currently blocked by rule state.");
+        }
+
+        private static void LogInvalidMoveAttempt(Position source, Position destination, MoveResult result)
+        {
+            if (result == null)
+            {
+                Debug.LogWarning($"Invalid move {source} -> {destination}: unknown failure.");
+                return;
+            }
+
+            Debug.LogWarning($"Invalid move {source} -> {destination}: {result.Message}");
+        }
+
+        private static void LogSuccessfulMove(Position source, Position destination, MoveResult result)
+        {
+            if (result == null)
+            {
+                Debug.Log($"Move {source} -> {destination} applied.");
+                return;
+            }
+
+            Debug.Log($"Valid move {source} -> {destination}. Moves used: {result.MovesUsed}. Win={result.IsWin}, Fail={result.IsFail}");
+        }
+
         /// <summary>
         /// Retries the currently active level from its initial data.
         /// </summary>
         public void OnRetryPressed()
         {
+            // Retry is a full level reset: board, move counter, selection, and terminal popup visibility.
             LoadLevel(currentLevelIndex, true);
         }
 
@@ -145,6 +200,7 @@ namespace PuzzleDungeon.Gameplay
 
             if (nextLevelIndex >= levels.Length)
             {
+                // End-of-list behavior for Step 6: return to menu when there is no next level.
                 OnMenuPressed();
                 return;
             }
@@ -176,6 +232,7 @@ namespace PuzzleDungeon.Gameplay
             gameRules = new GameRules(levelData.MoveLimit, new Position(levelData.GoalX, levelData.GoalY), levelData.GoalTileId);
             gameRules.ResetMoveCounter();
             selectedPosition = null;
+            HideTerminalPopups();
 
             if (persistCurrentLevel)
             {
@@ -188,6 +245,16 @@ namespace PuzzleDungeon.Gameplay
             UpdateLevelTitleText();
             UpdateMoveCounterText();
             UpdateTerminalPopups();
+        }
+
+        private int ResolveStartupLevelIndex()
+        {
+            int highestPlayableIndex = levels.Length - 1;
+            int savedCurrentLevelIndex = saveService.GetCurrentLevelIndex();
+            int savedUnlockedLevelIndex = saveService.GetUnlockedLevelIndex();
+            int clampedCurrentLevel = Mathf.Clamp(savedCurrentLevelIndex, 0, highestPlayableIndex);
+            int clampedUnlockedLevel = Mathf.Clamp(savedUnlockedLevelIndex, 0, highestPlayableIndex);
+            return Mathf.Min(clampedCurrentLevel, clampedUnlockedLevel);
         }
 
         private void EnsureEventSystemWithInputSystem()
@@ -360,11 +427,25 @@ namespace PuzzleDungeon.Gameplay
                 return;
             }
 
+            // Terminal state is mutually exclusive by design: win has priority over fail.
             bool hasWon = gameRules.HasWon(boardState);
             bool hasLost = !hasWon && gameRules.HasLost(boardState);
 
             winPopupPanel.SetActive(hasWon);
             failPopupPanel.SetActive(hasLost);
+        }
+
+        private void HideTerminalPopups()
+        {
+            if (winPopupPanel != null)
+            {
+                winPopupPanel.SetActive(false);
+            }
+
+            if (failPopupPanel != null)
+            {
+                failPopupPanel.SetActive(false);
+            }
         }
 
         private static Text CreateText(Transform parent, string name, Vector2 anchoredPosition, Vector2 size, int fontSize)
