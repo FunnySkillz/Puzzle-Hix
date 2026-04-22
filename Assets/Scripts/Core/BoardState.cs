@@ -95,6 +95,15 @@ namespace PuzzleDungeon.Core
         }
 
         /// <summary>
+        /// Clears any tile at the requested position and leaves the cell empty.
+        /// </summary>
+        public void ClearCell(Position position)
+        {
+            EnsureInBounds(position);
+            cells[position.X, position.Y].RemoveTile();
+        }
+
+        /// <summary>
         /// Moves a tile from one cell to another when the source has a tile and the target is empty.
         /// </summary>
         public bool MoveTile(Position from, Position to)
@@ -135,7 +144,7 @@ namespace PuzzleDungeon.Core
             {
                 for (int x = 0; x < Width; x++)
                 {
-                    cells[x, y].RemoveTile();
+                    ClearCell(new Position(x, y));
                 }
             }
 
