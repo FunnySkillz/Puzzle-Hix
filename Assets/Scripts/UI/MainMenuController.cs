@@ -12,7 +12,7 @@ namespace PuzzleDungeon.UI
     [DisallowMultipleComponent]
     public class MainMenuController : MonoBehaviour
     {
-        [SerializeField] private string gameplaySceneName = "PuzzleBoard";
+        private const string GameplaySceneName = "PuzzleBoard";
 
         private void Awake()
         {
@@ -25,7 +25,8 @@ namespace PuzzleDungeon.UI
         /// </summary>
         public void OnStartGame()
         {
-            SceneManager.LoadScene(gameplaySceneName);
+            // Step-6 menu contract: Start always enters the dedicated gameplay board scene.
+            SceneManager.LoadScene(GameplaySceneName);
         }
 
         /// <summary>
