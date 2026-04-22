@@ -3,13 +3,13 @@ using UnityEngine;
 namespace PuzzleDungeon.Infrastructure
 {
     /// <summary>
-    /// Legacy bootstrap placeholder. The playable board scene now uses GameController directly.
+    /// Optional scene bootstrap entry point reserved for cross-scene wiring; gameplay currently starts via GameController.
     /// </summary>
     public class GameBootstrap : MonoBehaviour
     {
         private void Awake()
         {
-            Debug.LogWarning("GameBootstrap is deprecated. Use GameController in the PuzzleBoard scene as the runtime entry point.");
+            Debug.Log("GameBootstrap is active. Gameplay runtime is currently managed by GameController in PuzzleBoard.");
         }
     }
 }
