@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using NUnit.Framework;
+using PuzzleDungeon.Core;
 using PuzzleDungeon.Gameplay;
 using UnityEngine;
 
@@ -11,6 +12,36 @@ namespace PuzzleDungeon.Tests.EditMode
     /// </summary>
     public class LevelLoaderTests
     {
+        [Test]
+        public void Load_ReturnsBoardState_WithPlacedTilesForValidLayout()
+        {
+            LevelData levelData = CreateLevelData(
+                width: 3,
+                height: 2,
+                placements: new[]
+                {
+                    CreatePlacement("tile_a", 0, 0),
+                    CreatePlacement("tile_b", 2, 1)
+                });
+
+            LevelLoader loader = new LevelLoader();
+
+            try
+            {
+                BoardState boardState = loader.Load(levelData);
+
+                Assert.That(boardState.Width, Is.EqualTo(3));
+                Assert.That(boardState.Height, Is.EqualTo(2));
+                Assert.That(boardState.GetTile(new Position(0, 0)).Id, Is.EqualTo("tile_a"));
+                Assert.That(boardState.GetTile(new Position(2, 1)).Id, Is.EqualTo("tile_b"));
+                Assert.That(boardState.IsCellEmpty(new Position(1, 0)), Is.True);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(levelData);
+            }
+        }
+
         [Test]
         public void Load_Throws_WhenPlacementIsOutOfBounds()
         {
