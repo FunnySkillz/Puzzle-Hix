@@ -1,8 +1,7 @@
 using System.Collections;
-using System.Text.RegularExpressions;
+using System.Linq;
 using NUnit.Framework;
-using PuzzleDungeon.Core;
-using PuzzleDungeon.Gameplay;
+using PuzzleDungeon.Gameplay.Match3;
 using PuzzleDungeon.UI;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -12,32 +11,12 @@ using UnityEngine.UI;
 namespace PuzzleDungeon.Tests.PlayMode
 {
     /// <summary>
-    /// Validates scene startup and a minimal gameplay interaction path in runtime context.
+    /// Validates the menu flow and the active match-3 prototype scene.
     /// </summary>
     public class RuntimeSmokeTests
     {
         private const string MainMenuSceneName = "MainMenu";
         private const string PuzzleBoardSceneName = "PuzzleBoard";
-
-        private const string CurrentLevelKey = "PuzzleDungeon.CurrentLevelIndex";
-        private const string UnlockedLevelKey = "PuzzleDungeon.UnlockedLevelIndex";
-        private const string BestMoveLevelTestKey = "PuzzleDungeon.BestMove.level_test";
-        private const string BestMoveLevelTest2Key = "PuzzleDungeon.BestMove.level_test_2";
-        private const string BestMoveLevelPrototype3Key = "PuzzleDungeon.BestMove.level_prototype_3";
-        private const string BestMoveLevelPrototype4Key = "PuzzleDungeon.BestMove.level_prototype_4";
-        private const string BestMoveLevelPrototype5Key = "PuzzleDungeon.BestMove.level_prototype_5";
-
-        [SetUp]
-        public void SetUp()
-        {
-            ClearProgressKeys();
-        }
-
-        [TearDown]
-        public void TearDown()
-        {
-            ClearProgressKeys();
-        }
 
         [UnityTest]
         public IEnumerator MainMenuScene_LoadsWithController()
@@ -50,7 +29,7 @@ namespace PuzzleDungeon.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator StartFlow_LoadsPuzzleBoardAndBuildsBoardUi()
+        public IEnumerator StartFlow_LoadsPuzzleBoardAndBuildsMatch3Board()
         {
             SceneManager.LoadScene(MainMenuSceneName);
             yield return null;
@@ -60,176 +39,176 @@ namespace PuzzleDungeon.Tests.PlayMode
 
             mainMenuController.OnStartGame();
             yield return WaitForScene(PuzzleBoardSceneName, 3f);
+            yield return null;
 
+            BoardManager boardManager = Object.FindObjectOfType<BoardManager>();
             Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo(PuzzleBoardSceneName));
-            Assert.That(Object.FindObjectOfType<GameController>(), Is.Not.Null);
-            Assert.That(GameObject.Find("MoveCountText"), Is.Not.Null);
-            Assert.That(GameObject.Find("StatusText"), Is.Not.Null);
-            Assert.That(Object.FindObjectsOfType<BoardCellView>().Length, Is.GreaterThan(0));
+            Assert.That(boardManager, Is.Not.Null);
+            Assert.That(Object.FindObjectsOfType<Piece>().Length, Is.EqualTo(64));
+            Assert.That(GameObject.Find("ScoreText"), Is.Not.Null);
+            Assert.That(GameObject.Find("MovesText"), Is.Not.Null);
+            Assert.That(GameObject.Find("TargetText"), Is.Not.Null);
+            Assert.That(Resources.FindObjectsOfTypeAll<Button>().Any(button => button.name == "RestartButton"), Is.True);
         }
 
         [UnityTest]
-        public IEnumerator PuzzleBoard_LoadsPrototypeThemeVisuals()
+        public IEnumerator PuzzleBoard_UsesThemeOrFallbackVisuals()
         {
             SceneManager.LoadScene(PuzzleBoardSceneName);
             yield return null;
 
-            GameObject backgroundObject = GameObject.Find("CanvasBackground");
-            GameObject firstCellObject = GameObject.Find("Cell_0_0");
+            Piece firstPiece = Object.FindObjectsOfType<Piece>().FirstOrDefault();
+            Image firstPieceImage = firstPiece != null ? firstPiece.GetComponent<Image>() : null;
 
-            Assert.That(backgroundObject, Is.Not.Null);
-            Assert.That(firstCellObject, Is.Not.Null);
-            Assert.That(firstCellObject.GetComponent<Image>().sprite, Is.Not.Null);
+            Assert.That(GameObject.Find("CanvasBackground"), Is.Not.Null);
+            Assert.That(GameObject.Find("Match3Cell_0_0"), Is.Not.Null);
+            Assert.That(firstPiece, Is.Not.Null);
+            Assert.That(firstPieceImage, Is.Not.Null);
+            Assert.That(firstPieceImage.color.a, Is.GreaterThan(0f));
         }
 
         [UnityTest]
-        public IEnumerator GameplayInteraction_ValidThenInvalid_KeepsBoardResponsive()
+        public IEnumerator ClickValidSwap_ConsumesMoveScoresAndRefillsBoard()
         {
             SceneManager.LoadScene(PuzzleBoardSceneName);
             yield return null;
 
-            GameController gameController = Object.FindObjectOfType<GameController>();
-            Assert.That(gameController, Is.Not.Null);
-
-            Text moveCounter = GameObject.Find("MoveCountText")?.GetComponent<Text>();
-            Assert.That(moveCounter, Is.Not.Null);
-            Assert.That(moveCounter.text, Does.Contain("0"));
-
-            // Level_Test: move tile "a" from (1,0) to empty (1,1) should be valid.
-            LogAssert.Expect(LogType.Log, new Regex(@"^Valid move \(1, 0\) -> \(1, 1\)\. Moves used: 1\..*$"));
-            gameController.HandleCellInteraction(new Position(1, 0));
-            gameController.HandleCellInteraction(new Position(1, 1));
+            BoardManager boardManager = Object.FindObjectOfType<BoardManager>();
+            boardManager.SetBoardForTesting(CreatePlayableBoard(), 25, 999999);
             yield return null;
 
-            Assert.That(moveCounter.text, Does.StartWith("Moves: 1/"));
+            Assert.That(boardManager.TryFindFirstValidSwap(out Vector2Int from, out Vector2Int to), Is.True);
 
-            // Attempt adjacent occupied destination to verify invalid move handling and stable move count.
-            LogAssert.Expect(LogType.Warning, new Regex(@"^Invalid move \(1, 1\) -> \(2, 1\): .*occupied\.$"));
-            gameController.HandleCellInteraction(new Position(1, 1));
-            gameController.HandleCellInteraction(new Position(2, 1));
-            yield return null;
+            int startingMoves = boardManager.MovesRemaining;
+            boardManager.HandlePieceClicked(boardManager.GetPieceAt(from.x, from.y));
+            boardManager.HandlePieceClicked(boardManager.GetPieceAt(to.x, to.y));
+            Assert.That(boardManager.IsInputBlocked, Is.True);
 
-            Assert.That(moveCounter.text, Does.StartWith("Moves: 1/"));
+            yield return WaitUntilStable(boardManager);
+
+            Assert.That(boardManager.MovesRemaining, Is.EqualTo(startingMoves - 1));
+            Assert.That(boardManager.CurrentScore, Is.GreaterThan(0));
+            AssertBoardIsFilledAndSynchronized(boardManager, 8, 8);
         }
 
         [UnityTest]
-        public IEnumerator GameplayInteraction_DiagonalAndLongDistanceMoves_FailWithoutMoveCountChange()
+        public IEnumerator ClickInvalidSwap_ReturnsPiecesAndKeepsMoves()
         {
             SceneManager.LoadScene(PuzzleBoardSceneName);
             yield return null;
 
-            GameController gameController = Object.FindObjectOfType<GameController>();
-            Text moveCounter = GameObject.Find("MoveCountText")?.GetComponent<Text>();
-
-            Assert.That(gameController, Is.Not.Null);
-            Assert.That(moveCounter, Is.Not.Null);
-
-            LogAssert.Expect(LogType.Warning, new Regex(@"^Invalid move \(0, 0\) -> \(1, 1\): .*one square.*$"));
-            gameController.HandleCellInteraction(new Position(0, 0));
-            gameController.HandleCellInteraction(new Position(1, 1));
+            BoardManager boardManager = Object.FindObjectOfType<BoardManager>();
+            boardManager.SetBoardForTesting(CreatePlayableBoard(), 25, 999999);
             yield return null;
 
-            Assert.That(moveCounter.text, Does.StartWith("Moves: 0/"));
+            Assert.That(boardManager.TryFindFirstInvalidAdjacentSwap(out Vector2Int from, out Vector2Int to), Is.True);
 
-            LogAssert.Expect(LogType.Warning, new Regex(@"^Invalid move \(0, 0\) -> \(0, 2\): .*one square.*$"));
-            gameController.HandleCellInteraction(new Position(0, 2));
-            yield return null;
+            Piece firstBefore = boardManager.GetPieceAt(from.x, from.y);
+            Piece secondBefore = boardManager.GetPieceAt(to.x, to.y);
+            int startingMoves = boardManager.MovesRemaining;
+            int startingScore = boardManager.CurrentScore;
 
-            Assert.That(moveCounter.text, Does.StartWith("Moves: 0/"));
+            boardManager.HandlePieceClicked(firstBefore);
+            boardManager.HandlePieceClicked(secondBefore);
+            yield return WaitUntilStable(boardManager);
+
+            Assert.That(boardManager.MovesRemaining, Is.EqualTo(startingMoves));
+            Assert.That(boardManager.CurrentScore, Is.EqualTo(startingScore));
+            Assert.That(boardManager.GetPieceAt(from.x, from.y), Is.EqualTo(firstBefore));
+            Assert.That(boardManager.GetPieceAt(to.x, to.y), Is.EqualTo(secondBefore));
         }
 
         [UnityTest]
-        public IEnumerator WinRetryNextAndMenuFlow_WorkFromPuzzleBoard()
+        public IEnumerator DragSwap_UsesDominantCardinalDirection()
         {
             SceneManager.LoadScene(PuzzleBoardSceneName);
             yield return null;
 
-            GameController gameController = Object.FindObjectOfType<GameController>();
-            Assert.That(gameController, Is.Not.Null);
-
-            SolveFirstLevel(gameController);
+            BoardManager boardManager = Object.FindObjectOfType<BoardManager>();
+            boardManager.SetBoardForTesting(CreatePlayableBoard(), 25, 999999);
             yield return null;
 
-            GameObject winPopup = GameObject.Find("WinPopup");
-            Assert.That(winPopup, Is.Not.Null);
-            Assert.That(winPopup.activeSelf, Is.True);
+            Assert.That(boardManager.TryFindFirstValidSwap(out Vector2Int from, out Vector2Int to), Is.True);
 
-            gameController.OnNextLevelPressed();
-            yield return null;
+            int startingMoves = boardManager.MovesRemaining;
+            Vector2 delta = new Vector2(to.x - from.x, to.y - from.y) * 80f;
+            boardManager.HandlePieceDrag(boardManager.GetPieceAt(from.x, from.y), delta);
+            yield return WaitUntilStable(boardManager);
 
-            Text levelTitle = GameObject.Find("LevelTitleText")?.GetComponent<Text>();
-            Text moveCounter = GameObject.Find("MoveCountText")?.GetComponent<Text>();
-            Assert.That(levelTitle, Is.Not.Null);
-            Assert.That(moveCounter, Is.Not.Null);
-            Assert.That(levelTitle.text, Is.EqualTo("Level 2"));
-            Assert.That(moveCounter.text, Does.StartWith("Moves: 0/"));
-
-            gameController.OnRetryPressed();
-            yield return null;
-
-            Assert.That(moveCounter.text, Does.StartWith("Moves: 0/"));
-
-            gameController.OnMenuPressed();
-            yield return WaitForScene(MainMenuSceneName, 3f);
-
-            Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo(MainMenuSceneName));
+            Assert.That(boardManager.MovesRemaining, Is.EqualTo(startingMoves - 1));
+            Assert.That(boardManager.CurrentScore, Is.GreaterThan(0));
         }
 
         [UnityTest]
-        public IEnumerator FailPopupAndRetry_WorkWhenMoveLimitIsReached()
+        public IEnumerator WinLossAndRestart_EndStatesWork()
         {
             SceneManager.LoadScene(PuzzleBoardSceneName);
             yield return null;
 
-            GameController gameController = Object.FindObjectOfType<GameController>();
-            Text moveCounter = GameObject.Find("MoveCountText")?.GetComponent<Text>();
-            Assert.That(gameController, Is.Not.Null);
-            Assert.That(moveCounter, Is.Not.Null);
+            BoardManager boardManager = Object.FindObjectOfType<BoardManager>();
+            boardManager.SetBoardForTesting(CreatePlayableBoard(), 25, 10);
+            yield return null;
 
-            for (int i = 0; i < 4; i++)
+            yield return PlayFirstValidSwap(boardManager);
+
+            Assert.That(boardManager.IsGameOver, Is.True);
+            Assert.That(boardManager.HasWon, Is.True);
+            Assert.That(GameObject.Find("EndGameTitle").GetComponent<Text>().text, Is.EqualTo("Level Complete"));
+
+            boardManager.StartNewGame();
+            yield return null;
+            Assert.That(boardManager.IsGameOver, Is.False);
+            Assert.That(boardManager.CurrentScore, Is.EqualTo(0));
+            Assert.That(boardManager.MovesRemaining, Is.EqualTo(25));
+
+            boardManager.SetBoardForTesting(CreatePlayableBoard(), 1, 999999);
+            yield return null;
+            yield return PlayFirstValidSwap(boardManager);
+
+            Assert.That(boardManager.IsGameOver, Is.True);
+            Assert.That(boardManager.HasWon, Is.False);
+            Assert.That(GameObject.Find("EndGameTitle").GetComponent<Text>().text, Is.EqualTo("Game Over"));
+
+            boardManager.StartNewGame();
+            yield return null;
+            Assert.That(boardManager.IsGameOver, Is.False);
+            Assert.That(Object.FindObjectsOfType<Piece>().Length, Is.EqualTo(64));
+        }
+
+        private static IEnumerator PlayFirstValidSwap(BoardManager boardManager)
+        {
+            Assert.That(boardManager.TryFindFirstValidSwap(out Vector2Int from, out Vector2Int to), Is.True);
+            boardManager.HandlePieceClicked(boardManager.GetPieceAt(from.x, from.y));
+            boardManager.HandlePieceClicked(boardManager.GetPieceAt(to.x, to.y));
+
+            float endTime = Time.realtimeSinceStartup + 5f;
+
+            while (Time.realtimeSinceStartup < endTime)
             {
-                gameController.HandleCellInteraction(new Position(1, 0));
-                gameController.HandleCellInteraction(new Position(1, 1));
-                yield return null;
+                if (boardManager.IsGameOver || !boardManager.IsInputBlocked)
+                {
+                    yield break;
+                }
 
-                gameController.HandleCellInteraction(new Position(1, 1));
-                gameController.HandleCellInteraction(new Position(1, 0));
+                yield return null;
+            }
+        }
+
+        private static IEnumerator WaitUntilStable(BoardManager boardManager)
+        {
+            float endTime = Time.realtimeSinceStartup + 5f;
+
+            while (Time.realtimeSinceStartup < endTime)
+            {
+                if (!boardManager.IsInputBlocked)
+                {
+                    yield break;
+                }
+
                 yield return null;
             }
 
-            GameObject failPopup = GameObject.Find("FailPopup");
-            Assert.That(failPopup, Is.Not.Null);
-            Assert.That(failPopup.activeSelf, Is.True);
-            Assert.That(moveCounter.text, Does.StartWith("Moves: 8/"));
-
-            gameController.OnRetryPressed();
-            yield return null;
-
-            Assert.That(failPopup.activeSelf, Is.False);
-            Assert.That(moveCounter.text, Does.StartWith("Moves: 0/"));
-        }
-
-        [UnityTest]
-        public IEnumerator SavedProgress_ResumesUnlockedCurrentLevel()
-        {
-            SceneManager.LoadScene(PuzzleBoardSceneName);
-            yield return null;
-
-            GameController gameController = Object.FindObjectOfType<GameController>();
-            Assert.That(gameController, Is.Not.Null);
-
-            SolveFirstLevel(gameController);
-            yield return null;
-
-            gameController.OnNextLevelPressed();
-            yield return null;
-
-            SceneManager.LoadScene(PuzzleBoardSceneName);
-            yield return null;
-
-            Text levelTitle = GameObject.Find("LevelTitleText")?.GetComponent<Text>();
-            Assert.That(levelTitle, Is.Not.Null);
-            Assert.That(levelTitle.text, Is.EqualTo("Level 2"));
+            Assert.Fail("Board did not finish resolving within the timeout.");
         }
 
         private static IEnumerator WaitForScene(string expectedSceneName, float timeoutSeconds)
@@ -245,34 +224,40 @@ namespace PuzzleDungeon.Tests.PlayMode
 
                 yield return null;
             }
+
+            Assert.Fail($"Scene '{expectedSceneName}' was not loaded within the timeout.");
         }
 
-        private static void SolveFirstLevel(GameController gameController)
+        private static PieceType[,] CreatePlayableBoard()
         {
-            gameController.HandleCellInteraction(new Position(0, 0));
-            gameController.HandleCellInteraction(new Position(0, 1));
-            gameController.HandleCellInteraction(new Position(0, 1));
-            gameController.HandleCellInteraction(new Position(0, 2));
-            gameController.HandleCellInteraction(new Position(0, 2));
-            gameController.HandleCellInteraction(new Position(0, 3));
-            gameController.HandleCellInteraction(new Position(0, 3));
-            gameController.HandleCellInteraction(new Position(1, 3));
-            gameController.HandleCellInteraction(new Position(1, 3));
-            gameController.HandleCellInteraction(new Position(2, 3));
-            gameController.HandleCellInteraction(new Position(2, 3));
-            gameController.HandleCellInteraction(new Position(3, 3));
+            return BoardManager.GenerateBoardTypes(8, 8, AllTypes(), 1234);
         }
 
-        private static void ClearProgressKeys()
+        private static PieceType[] AllTypes()
         {
-            PlayerPrefs.DeleteKey(CurrentLevelKey);
-            PlayerPrefs.DeleteKey(UnlockedLevelKey);
-            PlayerPrefs.DeleteKey(BestMoveLevelTestKey);
-            PlayerPrefs.DeleteKey(BestMoveLevelTest2Key);
-            PlayerPrefs.DeleteKey(BestMoveLevelPrototype3Key);
-            PlayerPrefs.DeleteKey(BestMoveLevelPrototype4Key);
-            PlayerPrefs.DeleteKey(BestMoveLevelPrototype5Key);
-            PlayerPrefs.Save();
+            return new[]
+            {
+                PieceType.Red,
+                PieceType.Blue,
+                PieceType.Green,
+                PieceType.Yellow,
+                PieceType.Purple,
+                PieceType.Orange
+            };
+        }
+
+        private static void AssertBoardIsFilledAndSynchronized(BoardManager boardManager, int width, int height)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    Piece piece = boardManager.GetPieceAt(x, y);
+                    Assert.That(piece, Is.Not.Null, $"Expected a piece at {x},{y}.");
+                    Assert.That(piece.GridX, Is.EqualTo(x));
+                    Assert.That(piece.GridY, Is.EqualTo(y));
+                }
+            }
         }
     }
 }
