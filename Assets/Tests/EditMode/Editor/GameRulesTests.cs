@@ -43,6 +43,38 @@ namespace PuzzleDungeon.Tests.EditMode
         }
 
         [Test]
+        public void TryMove_ReturnsFailure_ForLongDistanceMove()
+        {
+            BoardState board = new BoardState(3, 1);
+            board.PlaceTile(new Position(0, 0), new Tile("a"));
+
+            GameRules rules = new GameRules(moveLimit: 3, goalPosition: new Position(2, 0), goalTileId: "goal");
+
+            MoveResult result = rules.TryMove(board, new Position(0, 0), new Position(2, 0));
+
+            Assert.That(result.IsSuccess, Is.False);
+            Assert.That(result.Message, Does.Contain("one square"));
+            Assert.That(board.GetTile(new Position(0, 0)).Id, Is.EqualTo("a"));
+            Assert.That(board.IsCellEmpty(new Position(2, 0)), Is.True);
+        }
+
+        [Test]
+        public void TryMove_ReturnsFailure_ForDiagonalMove()
+        {
+            BoardState board = new BoardState(2, 2);
+            board.PlaceTile(new Position(0, 0), new Tile("a"));
+
+            GameRules rules = new GameRules(moveLimit: 3, goalPosition: new Position(1, 1), goalTileId: "goal");
+
+            MoveResult result = rules.TryMove(board, new Position(0, 0), new Position(1, 1));
+
+            Assert.That(result.IsSuccess, Is.False);
+            Assert.That(result.Message, Does.Contain("one square"));
+            Assert.That(board.GetTile(new Position(0, 0)).Id, Is.EqualTo("a"));
+            Assert.That(board.IsCellEmpty(new Position(1, 1)), Is.True);
+        }
+
+        [Test]
         public void TryMove_ReturnsFailure_ForOutOfBoundsMove()
         {
             BoardState board = new BoardState(2, 1);

@@ -1,0 +1,19 @@
+{
+    "name": "PuzzleDungeon.Tests.PlayMode",
+    "rootNamespace": "PuzzleDungeon.Tests.PlayMode",
+    "references": [
+        "PuzzleDungeon.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "noEngineReferences": false
+}

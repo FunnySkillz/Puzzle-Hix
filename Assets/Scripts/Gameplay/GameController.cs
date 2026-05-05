@@ -18,6 +18,7 @@ namespace PuzzleDungeon.Gameplay
     public class GameController : MonoBehaviour
     {
         private const string MainMenuSceneName = "MainMenu";
+        private const float InvalidFeedbackSeconds = 0.28f;
 
         [Header("Level Progression")]
         [SerializeField] private LevelData[] levels = Array.Empty<LevelData>();
@@ -26,11 +27,15 @@ namespace PuzzleDungeon.Gameplay
         [SerializeField] private Vector2 cellSize = new Vector2(96f, 96f);
         [SerializeField] private Vector2 cellSpacing = new Vector2(6f, 6f);
 
-        [Header("Colors")]
+        [Header("Theme")]
+        [SerializeField] private PrototypeTheme theme;
+
+        [Header("Fallback Colors")]
         [SerializeField] private Color emptyCellColor = new Color(0.18f, 0.20f, 0.24f, 1f);
         [SerializeField] private Color occupiedCellColor = new Color(0.28f, 0.55f, 0.78f, 1f);
         [SerializeField] private Color selectedCellColor = new Color(0.95f, 0.76f, 0.25f, 1f);
         [SerializeField] private Color goalCellColor = new Color(0.30f, 0.70f, 0.40f, 1f);
+        [SerializeField] private Color invalidCellColor = new Color(0.90f, 0.18f, 0.16f, 1f);
 
         private readonly Dictionary<Position, BoardCellView> boardCellViews = new Dictionary<Position, BoardCellView>();
         private readonly LevelLoader levelLoader = new LevelLoader();
@@ -39,13 +44,29 @@ namespace PuzzleDungeon.Gameplay
         private BoardState boardState;
         private GameRules gameRules;
         private Position? selectedPosition;
+        private Position? invalidFeedbackPosition;
         private int currentLevelIndex;
 
         private GridLayoutGroup boardGrid;
+        private Image canvasBackgroundImage;
         private Text moveCountText;
         private Text levelTitleText;
+        private Text statusText;
         private GameObject winPopupPanel;
         private GameObject failPopupPanel;
+
+        private PrototypeTheme ActiveTheme
+        {
+            get
+            {
+                if (theme == null)
+                {
+                    theme = PrototypeTheme.LoadDefault();
+                }
+
+                return theme;
+            }
+        }
 
         private void Awake()
         {
@@ -87,9 +108,13 @@ namespace PuzzleDungeon.Gameplay
                 if (!boardState.IsCellEmpty(clickedPosition))
                 {
                     selectedPosition = clickedPosition;
+                    invalidFeedbackPosition = null;
+                    SetStatus("Choose an adjacent empty square.");
                     RefreshBoardVisuals();
+                    return;
                 }
 
+                ShowInvalidSelection(clickedPosition, "Pick a tile first.");
                 return;
             }
 
@@ -98,32 +123,24 @@ namespace PuzzleDungeon.Gameplay
             if (source == clickedPosition)
             {
                 selectedPosition = null;
+                invalidFeedbackPosition = null;
+                SetStatus("Selection cleared.");
                 RefreshBoardVisuals();
                 return;
             }
 
-            if (!boardState.IsCellEmpty(clickedPosition))
-            {
-                // Invalid move by design: occupied destinations are rejected and selection remains unchanged.
-                MoveResult occupiedCellResult = gameRules.TryMove(boardState, source, clickedPosition);
-                LogInvalidMoveAttempt(source, clickedPosition, occupiedCellResult);
-                UpdateMoveCounterText();
-                UpdateTerminalPopups();
-                return;
-            }
-
-            // Route all move execution through GameRules to preserve gameplay authority in core logic.
             MoveResult result = gameRules.TryMove(boardState, source, clickedPosition);
 
             if (!result.IsSuccess)
             {
-                LogInvalidMoveAttempt(source, clickedPosition, result);
+                ShowInvalidMove(source, clickedPosition, result);
                 UpdateMoveCounterText();
                 UpdateTerminalPopups();
                 return;
             }
 
             selectedPosition = null;
+            invalidFeedbackPosition = null;
             LogSuccessfulMove(source, clickedPosition, result);
 
             if (result.IsWin)
@@ -131,6 +148,15 @@ namespace PuzzleDungeon.Gameplay
                 saveService.SetBestMoveCount(levels[currentLevelIndex].LevelId, result.MovesUsed);
                 saveService.SetUnlockedLevelIndex(currentLevelIndex + 1);
                 saveService.Flush();
+                SetStatus("Level complete!");
+            }
+            else if (result.IsFail)
+            {
+                SetStatus("No moves left.");
+            }
+            else
+            {
+                SetStatus("Nice slide.");
             }
 
             RefreshBoardVisuals();
@@ -138,56 +164,11 @@ namespace PuzzleDungeon.Gameplay
             UpdateTerminalPopups();
         }
 
-        private void LogInteractionBlockedReason()
-        {
-            if (boardState == null || gameRules == null)
-            {
-                return;
-            }
-
-            if (gameRules.HasWon(boardState))
-            {
-                Debug.LogWarning("Interaction ignored: level is already completed.");
-                return;
-            }
-
-            if (gameRules.HasLost(boardState))
-            {
-                Debug.LogWarning("Interaction ignored: move limit reached.");
-                return;
-            }
-
-            Debug.LogWarning("Interaction ignored: moves are currently blocked by rule state.");
-        }
-
-        private static void LogInvalidMoveAttempt(Position source, Position destination, MoveResult result)
-        {
-            if (result == null)
-            {
-                Debug.LogWarning($"Invalid move {source} -> {destination}: unknown failure.");
-                return;
-            }
-
-            Debug.LogWarning($"Invalid move {source} -> {destination}: {result.Message}");
-        }
-
-        private static void LogSuccessfulMove(Position source, Position destination, MoveResult result)
-        {
-            if (result == null)
-            {
-                Debug.Log($"Move {source} -> {destination} applied.");
-                return;
-            }
-
-            Debug.Log($"Valid move {source} -> {destination}. Moves used: {result.MovesUsed}. Win={result.IsWin}, Fail={result.IsFail}");
-        }
-
         /// <summary>
         /// Retries the currently active level from its initial data.
         /// </summary>
         public void OnRetryPressed()
         {
-            // Retry is a full level reset: board, move counter, selection, and terminal popup visibility.
             LoadLevel(currentLevelIndex, true);
         }
 
@@ -200,7 +181,6 @@ namespace PuzzleDungeon.Gameplay
 
             if (nextLevelIndex >= levels.Length)
             {
-                // End-of-list behavior for Step 6: return to menu when there is no next level.
                 OnMenuPressed();
                 return;
             }
@@ -232,6 +212,8 @@ namespace PuzzleDungeon.Gameplay
             gameRules = new GameRules(levelData.MoveLimit, new Position(levelData.GoalX, levelData.GoalY), levelData.GoalTileId);
             gameRules.ResetMoveCounter();
             selectedPosition = null;
+            invalidFeedbackPosition = null;
+            CancelInvoke(nameof(ClearInvalidFeedback));
             HideTerminalPopups();
 
             if (persistCurrentLevel)
@@ -240,10 +222,11 @@ namespace PuzzleDungeon.Gameplay
                 saveService.Flush();
             }
 
-            BuildBoardVisuals(levelData);
+            BuildBoardVisuals();
             RefreshBoardVisuals();
             UpdateLevelTitleText();
             UpdateMoveCounterText();
+            SetStatus("Slide the G tile to the target.");
             UpdateTerminalPopups();
         }
 
@@ -255,6 +238,78 @@ namespace PuzzleDungeon.Gameplay
             int clampedCurrentLevel = Mathf.Clamp(savedCurrentLevelIndex, 0, highestPlayableIndex);
             int clampedUnlockedLevel = Mathf.Clamp(savedUnlockedLevelIndex, 0, highestPlayableIndex);
             return Mathf.Min(clampedCurrentLevel, clampedUnlockedLevel);
+        }
+
+        private void ShowInvalidSelection(Position clickedPosition, string message)
+        {
+            invalidFeedbackPosition = clickedPosition;
+            SetStatus(message);
+            RefreshBoardVisuals();
+            CancelInvoke(nameof(ClearInvalidFeedback));
+            Invoke(nameof(ClearInvalidFeedback), InvalidFeedbackSeconds);
+        }
+
+        private void ShowInvalidMove(Position source, Position destination, MoveResult result)
+        {
+            LogInvalidMoveAttempt(source, destination, result);
+            invalidFeedbackPosition = destination;
+            SetStatus(result != null ? result.Message : "That slide is blocked.");
+            RefreshBoardVisuals();
+            CancelInvoke(nameof(ClearInvalidFeedback));
+            Invoke(nameof(ClearInvalidFeedback), InvalidFeedbackSeconds);
+        }
+
+        private void ClearInvalidFeedback()
+        {
+            invalidFeedbackPosition = null;
+            RefreshBoardVisuals();
+        }
+
+        private void LogInteractionBlockedReason()
+        {
+            if (boardState == null || gameRules == null)
+            {
+                return;
+            }
+
+            if (gameRules.HasWon(boardState))
+            {
+                Debug.LogWarning("Interaction ignored: level is already completed.");
+                SetStatus("Level already complete.");
+                return;
+            }
+
+            if (gameRules.HasLost(boardState))
+            {
+                Debug.LogWarning("Interaction ignored: move limit reached.");
+                SetStatus("No moves left.");
+                return;
+            }
+
+            Debug.LogWarning("Interaction ignored: moves are currently blocked by rule state.");
+            SetStatus("Move blocked.");
+        }
+
+        private static void LogInvalidMoveAttempt(Position source, Position destination, MoveResult result)
+        {
+            if (result == null)
+            {
+                Debug.LogWarning($"Invalid move {source} -> {destination}: unknown failure.");
+                return;
+            }
+
+            Debug.LogWarning($"Invalid move {source} -> {destination}: {result.Message}");
+        }
+
+        private static void LogSuccessfulMove(Position source, Position destination, MoveResult result)
+        {
+            if (result == null)
+            {
+                Debug.Log($"Move {source} -> {destination} applied.");
+                return;
+            }
+
+            Debug.Log($"Valid move {source} -> {destination}. Moves used: {result.MovesUsed}. Win={result.IsWin}, Fail={result.IsFail}");
         }
 
         private void EnsureEventSystemWithInputSystem()
@@ -296,14 +351,21 @@ namespace PuzzleDungeon.Gameplay
                 scaler.matchWidthOrHeight = 0.5f;
             }
 
+            EnsureCanvasBackground(canvas.transform);
+
             if (levelTitleText == null)
             {
-                levelTitleText = CreateText(canvas.transform, "LevelTitleText", new Vector2(0f, -12f), new Vector2(500f, 56f), 28);
+                levelTitleText = CreateText(canvas.transform, "LevelTitleText", new Vector2(0f, -24f), new Vector2(620f, 56f), 30);
             }
 
             if (moveCountText == null)
             {
-                moveCountText = CreateText(canvas.transform, "MoveCountText", new Vector2(0f, -56f), new Vector2(500f, 64f), 34);
+                moveCountText = CreateText(canvas.transform, "MoveCountText", new Vector2(0f, -72f), new Vector2(620f, 64f), 34);
+            }
+
+            if (statusText == null)
+            {
+                statusText = CreateText(canvas.transform, "StatusText", new Vector2(0f, -142f), new Vector2(760f, 64f), 24);
             }
 
             if (boardGrid == null)
@@ -315,7 +377,7 @@ namespace PuzzleDungeon.Gameplay
                 boardRect.anchorMin = new Vector2(0.5f, 0.5f);
                 boardRect.anchorMax = new Vector2(0.5f, 0.5f);
                 boardRect.pivot = new Vector2(0.5f, 0.5f);
-                boardRect.anchoredPosition = new Vector2(0f, -40f);
+                boardRect.anchoredPosition = new Vector2(0f, -70f);
 
                 boardGrid = boardObject.GetComponent<GridLayoutGroup>();
                 boardGrid.startCorner = GridLayoutGroup.Corner.UpperLeft;
@@ -327,20 +389,42 @@ namespace PuzzleDungeon.Gameplay
             if (winPopupPanel == null)
             {
                 winPopupPanel = CreatePopupPanel(canvas.transform, "WinPopup", "You Win!", true);
-                CreatePopupButton(winPopupPanel.transform, "RetryButton", "Retry", new Vector2(-180f, -80f), OnRetryPressed);
-                CreatePopupButton(winPopupPanel.transform, "NextButton", "Next Level", new Vector2(0f, -80f), OnNextLevelPressed);
-                CreatePopupButton(winPopupPanel.transform, "MenuButton", "Menu", new Vector2(180f, -80f), OnMenuPressed);
+                CreatePopupButton(winPopupPanel.transform, "RetryButton", "Retry", new Vector2(-190f, -82f), ActiveTheme != null ? ActiveTheme.RetryIconSprite : null, OnRetryPressed);
+                CreatePopupButton(winPopupPanel.transform, "NextButton", "Next", new Vector2(0f, -82f), ActiveTheme != null ? ActiveTheme.NextIconSprite : null, OnNextLevelPressed);
+                CreatePopupButton(winPopupPanel.transform, "MenuButton", "Menu", new Vector2(190f, -82f), ActiveTheme != null ? ActiveTheme.MenuIconSprite : null, OnMenuPressed);
             }
 
             if (failPopupPanel == null)
             {
                 failPopupPanel = CreatePopupPanel(canvas.transform, "FailPopup", "Level Failed", true);
-                CreatePopupButton(failPopupPanel.transform, "RetryButton", "Retry", new Vector2(-90f, -80f), OnRetryPressed);
-                CreatePopupButton(failPopupPanel.transform, "MenuButton", "Menu", new Vector2(90f, -80f), OnMenuPressed);
+                CreatePopupButton(failPopupPanel.transform, "RetryButton", "Retry", new Vector2(-100f, -82f), ActiveTheme != null ? ActiveTheme.RetryIconSprite : null, OnRetryPressed);
+                CreatePopupButton(failPopupPanel.transform, "MenuButton", "Menu", new Vector2(100f, -82f), ActiveTheme != null ? ActiveTheme.MenuIconSprite : null, OnMenuPressed);
             }
         }
 
-        private void BuildBoardVisuals(LevelData levelData)
+        private void EnsureCanvasBackground(Transform canvasTransform)
+        {
+            if (canvasBackgroundImage != null)
+            {
+                return;
+            }
+
+            GameObject backgroundObject = new GameObject("CanvasBackground", typeof(RectTransform), typeof(Image));
+            backgroundObject.transform.SetParent(canvasTransform, false);
+            backgroundObject.transform.SetAsFirstSibling();
+
+            RectTransform backgroundRect = backgroundObject.GetComponent<RectTransform>();
+            backgroundRect.anchorMin = Vector2.zero;
+            backgroundRect.anchorMax = Vector2.one;
+            backgroundRect.offsetMin = Vector2.zero;
+            backgroundRect.offsetMax = Vector2.zero;
+
+            canvasBackgroundImage = backgroundObject.GetComponent<Image>();
+            canvasBackgroundImage.raycastTarget = false;
+            canvasBackgroundImage.color = ActiveTheme != null ? ActiveTheme.CanvasBackgroundColor : new Color(0.09f, 0.10f, 0.12f, 1f);
+        }
+
+        private void BuildBoardVisuals()
         {
             boardCellViews.Clear();
 
@@ -358,7 +442,6 @@ namespace PuzzleDungeon.Gameplay
                 (cellSize.x * boardState.Width) + (cellSpacing.x * (boardState.Width - 1)),
                 (cellSize.y * boardState.Height) + (cellSpacing.y * (boardState.Height - 1)));
 
-            // Build top-to-bottom so layout visually matches board coordinates.
             for (int y = boardState.Height - 1; y >= 0; y--)
             {
                 for (int x = 0; x < boardState.Width; x++)
@@ -376,6 +459,11 @@ namespace PuzzleDungeon.Gameplay
 
         private void RefreshBoardVisuals()
         {
+            if (boardState == null || currentLevelIndex < 0 || currentLevelIndex >= levels.Length)
+            {
+                return;
+            }
+
             LevelData levelData = levels[currentLevelIndex];
 
             foreach (KeyValuePair<Position, BoardCellView> pair in boardCellViews)
@@ -386,8 +474,9 @@ namespace PuzzleDungeon.Gameplay
                 Tile tile = boardState.GetTile(position);
                 bool isSelected = selectedPosition.HasValue && selectedPosition.Value == position;
                 bool isGoalCell = position.X == levelData.GoalX && position.Y == levelData.GoalY;
+                bool isInvalidCell = invalidFeedbackPosition.HasValue && invalidFeedbackPosition.Value == position;
 
-                view.SetVisual(tile, isSelected, isGoalCell, emptyCellColor, occupiedCellColor, selectedCellColor, goalCellColor);
+                view.SetVisual(tile, isSelected, isGoalCell, isInvalidCell, ActiveTheme, emptyCellColor, occupiedCellColor, selectedCellColor, goalCellColor, invalidCellColor);
             }
         }
 
@@ -420,6 +509,16 @@ namespace PuzzleDungeon.Gameplay
             }
         }
 
+        private void SetStatus(string message)
+        {
+            if (statusText == null)
+            {
+                return;
+            }
+
+            statusText.text = message;
+        }
+
         private void UpdateTerminalPopups()
         {
             if (winPopupPanel == null || failPopupPanel == null || gameRules == null || boardState == null)
@@ -427,7 +526,6 @@ namespace PuzzleDungeon.Gameplay
                 return;
             }
 
-            // Terminal state is mutually exclusive by design: win has priority over fail.
             bool hasWon = gameRules.HasWon(boardState);
             bool hasLost = !hasWon && gameRules.HasLost(boardState);
 
@@ -448,7 +546,7 @@ namespace PuzzleDungeon.Gameplay
             }
         }
 
-        private static Text CreateText(Transform parent, string name, Vector2 anchoredPosition, Vector2 size, int fontSize)
+        private Text CreateText(Transform parent, string name, Vector2 anchoredPosition, Vector2 size, int fontSize)
         {
             GameObject textObject = new GameObject(name, typeof(RectTransform), typeof(Text));
             textObject.transform.SetParent(parent, false);
@@ -461,14 +559,14 @@ namespace PuzzleDungeon.Gameplay
             textRect.sizeDelta = size;
 
             Text text = textObject.GetComponent<Text>();
-            text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             text.fontSize = fontSize;
             text.alignment = TextAnchor.MiddleCenter;
-            text.color = Color.white;
+            text.color = ActiveTheme != null ? ActiveTheme.TextColor : Color.white;
             return text;
         }
 
-        private static GameObject CreatePopupPanel(Transform parent, string name, string title, bool startHidden)
+        private GameObject CreatePopupPanel(Transform parent, string name, string title, bool startHidden)
         {
             GameObject panelObject = new GameObject(name, typeof(RectTransform), typeof(Image));
             panelObject.transform.SetParent(parent, false);
@@ -481,7 +579,8 @@ namespace PuzzleDungeon.Gameplay
             panelRect.sizeDelta = new Vector2(760f, 320f);
 
             Image panelImage = panelObject.GetComponent<Image>();
-            panelImage.color = new Color(0f, 0f, 0f, 0.82f);
+            panelImage.sprite = ActiveTheme != null ? ActiveTheme.PanelSprite : null;
+            panelImage.color = ActiveTheme != null ? ActiveTheme.PanelColor : new Color(0f, 0f, 0f, 0.82f);
 
             Text titleText = CreateCenteredChildText(panelObject.transform, "Title", title, new Vector2(0f, 64f), new Vector2(680f, 72f), 44);
             titleText.fontStyle = FontStyle.Bold;
@@ -490,7 +589,7 @@ namespace PuzzleDungeon.Gameplay
             return panelObject;
         }
 
-        private static Text CreateCenteredChildText(Transform parent, string name, string content, Vector2 anchoredPosition, Vector2 size, int fontSize)
+        private Text CreateCenteredChildText(Transform parent, string name, string content, Vector2 anchoredPosition, Vector2 size, int fontSize)
         {
             GameObject textObject = new GameObject(name, typeof(RectTransform), typeof(Text));
             textObject.transform.SetParent(parent, false);
@@ -504,14 +603,15 @@ namespace PuzzleDungeon.Gameplay
 
             Text text = textObject.GetComponent<Text>();
             text.text = content;
-            text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             text.fontSize = fontSize;
             text.alignment = TextAnchor.MiddleCenter;
-            text.color = Color.white;
+            text.color = ActiveTheme != null ? ActiveTheme.TextColor : Color.white;
+            text.raycastTarget = false;
             return text;
         }
 
-        private static void CreatePopupButton(Transform parent, string name, string label, Vector2 anchoredPosition, Action onPressed)
+        private void CreatePopupButton(Transform parent, string name, string label, Vector2 anchoredPosition, Sprite iconSprite, Action onPressed)
         {
             GameObject buttonObject = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
             buttonObject.transform.SetParent(parent, false);
@@ -521,17 +621,45 @@ namespace PuzzleDungeon.Gameplay
             buttonRect.anchorMax = new Vector2(0.5f, 0.5f);
             buttonRect.pivot = new Vector2(0.5f, 0.5f);
             buttonRect.anchoredPosition = anchoredPosition;
-            buttonRect.sizeDelta = new Vector2(160f, 56f);
+            buttonRect.sizeDelta = new Vector2(170f, 58f);
 
             Image buttonImage = buttonObject.GetComponent<Image>();
-            buttonImage.color = new Color(0.20f, 0.40f, 0.62f, 1f);
+            buttonImage.sprite = ActiveTheme != null ? ActiveTheme.ButtonSprite : null;
+            buttonImage.color = ActiveTheme != null ? ActiveTheme.ButtonColor : new Color(0.20f, 0.40f, 0.62f, 1f);
 
             Button button = buttonObject.GetComponent<Button>();
             button.targetGraphic = buttonImage;
             button.onClick.AddListener(() => onPressed?.Invoke());
 
-            Text labelText = CreateCenteredChildText(buttonObject.transform, "Label", label, Vector2.zero, new Vector2(150f, 46f), 24);
-            labelText.fontStyle = FontStyle.Bold;
+            if (iconSprite != null)
+            {
+                CreateButtonIcon(buttonObject.transform, iconSprite, new Vector2(-54f, 0f));
+                Text labelText = CreateCenteredChildText(buttonObject.transform, "Label", label, new Vector2(18f, 0f), new Vector2(112f, 46f), 22);
+                labelText.fontStyle = FontStyle.Bold;
+            }
+            else
+            {
+                Text labelText = CreateCenteredChildText(buttonObject.transform, "Label", label, Vector2.zero, new Vector2(150f, 46f), 24);
+                labelText.fontStyle = FontStyle.Bold;
+            }
+        }
+
+        private static void CreateButtonIcon(Transform parent, Sprite iconSprite, Vector2 anchoredPosition)
+        {
+            GameObject iconObject = new GameObject("Icon", typeof(RectTransform), typeof(Image));
+            iconObject.transform.SetParent(parent, false);
+
+            RectTransform iconRect = iconObject.GetComponent<RectTransform>();
+            iconRect.anchorMin = new Vector2(0.5f, 0.5f);
+            iconRect.anchorMax = new Vector2(0.5f, 0.5f);
+            iconRect.pivot = new Vector2(0.5f, 0.5f);
+            iconRect.anchoredPosition = anchoredPosition;
+            iconRect.sizeDelta = new Vector2(32f, 32f);
+
+            Image iconImage = iconObject.GetComponent<Image>();
+            iconImage.sprite = iconSprite;
+            iconImage.color = Color.white;
+            iconImage.raycastTarget = false;
         }
     }
 }

@@ -81,6 +81,11 @@ namespace PuzzleDungeon.Core
                 return MoveResult.Failure(MovesUsed, false, "Source cell is empty.");
             }
 
+            if (!IsOrthogonallyAdjacent(from, to))
+            {
+                return MoveResult.Failure(MovesUsed, false, "Tiles can only slide one square horizontally or vertically.");
+            }
+
             if (!boardState.IsCellEmpty(to))
             {
                 return MoveResult.Failure(MovesUsed, false, "Destination cell is already occupied.");
@@ -163,6 +168,13 @@ namespace PuzzleDungeon.Core
             }
 
             return MovesUsed >= moveLimit;
+        }
+
+        private static bool IsOrthogonallyAdjacent(Position from, Position to)
+        {
+            int deltaX = System.Math.Abs(from.X - to.X);
+            int deltaY = System.Math.Abs(from.Y - to.Y);
+            return (deltaX + deltaY) == 1;
         }
     }
 }

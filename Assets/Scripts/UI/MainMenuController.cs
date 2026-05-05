@@ -14,6 +14,21 @@ namespace PuzzleDungeon.UI
     {
         private const string GameplaySceneName = "PuzzleBoard";
 
+        [SerializeField] private PrototypeTheme theme;
+
+        private PrototypeTheme ActiveTheme
+        {
+            get
+            {
+                if (theme == null)
+                {
+                    theme = PrototypeTheme.LoadDefault();
+                }
+
+                return theme;
+            }
+        }
+
         private void Awake()
         {
             EnsureEventSystemWithInputSystem();
@@ -25,7 +40,6 @@ namespace PuzzleDungeon.UI
         /// </summary>
         public void OnStartGame()
         {
-            // Step-6 menu contract: Start always enters the dedicated gameplay board scene.
             SceneManager.LoadScene(GameplaySceneName);
         }
 
@@ -80,12 +94,30 @@ namespace PuzzleDungeon.UI
                 scaler.matchWidthOrHeight = 0.5f;
             }
 
+            CreateBackground(canvas.transform);
             CreateTitle(canvas.transform, "PuzzleDungeon");
-            CreateButton(canvas.transform, "StartButton", "Start Game", new Vector2(0f, -80f), OnStartGame);
-            CreateButton(canvas.transform, "QuitButton", "Quit", new Vector2(0f, -170f), OnQuitPressed);
+            CreateButton(canvas.transform, "StartButton", "Start Game", new Vector2(0f, -70f), ActiveTheme != null ? ActiveTheme.PlayIconSprite : null, OnStartGame);
+            CreateButton(canvas.transform, "QuitButton", "Quit", new Vector2(0f, -162f), ActiveTheme != null ? ActiveTheme.MenuIconSprite : null, OnQuitPressed);
         }
 
-        private static void CreateTitle(Transform parent, string title)
+        private void CreateBackground(Transform parent)
+        {
+            GameObject backgroundObject = new GameObject("CanvasBackground", typeof(RectTransform), typeof(Image));
+            backgroundObject.transform.SetParent(parent, false);
+            backgroundObject.transform.SetAsFirstSibling();
+
+            RectTransform rect = backgroundObject.GetComponent<RectTransform>();
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+
+            Image image = backgroundObject.GetComponent<Image>();
+            image.color = ActiveTheme != null ? ActiveTheme.CanvasBackgroundColor : new Color(0.09f, 0.10f, 0.12f, 1f);
+            image.raycastTarget = false;
+        }
+
+        private void CreateTitle(Transform parent, string title)
         {
             GameObject titleObject = new GameObject("Title", typeof(RectTransform), typeof(Text));
             titleObject.transform.SetParent(parent, false);
@@ -94,19 +126,19 @@ namespace PuzzleDungeon.UI
             rect.anchorMin = new Vector2(0.5f, 0.5f);
             rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = new Vector2(0f, 120f);
+            rect.anchoredPosition = new Vector2(0f, 140f);
             rect.sizeDelta = new Vector2(900f, 120f);
 
             Text text = titleObject.GetComponent<Text>();
             text.text = title;
-            text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             text.fontSize = 64;
             text.fontStyle = FontStyle.Bold;
             text.alignment = TextAnchor.MiddleCenter;
-            text.color = Color.white;
+            text.color = ActiveTheme != null ? ActiveTheme.TextColor : Color.white;
         }
 
-        private static void CreateButton(Transform parent, string name, string label, Vector2 anchoredPosition, UnityEngine.Events.UnityAction onPressed)
+        private void CreateButton(Transform parent, string name, string label, Vector2 anchoredPosition, Sprite iconSprite, UnityEngine.Events.UnityAction onPressed)
         {
             GameObject buttonObject = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
             buttonObject.transform.SetParent(parent, false);
@@ -116,14 +148,20 @@ namespace PuzzleDungeon.UI
             buttonRect.anchorMax = new Vector2(0.5f, 0.5f);
             buttonRect.pivot = new Vector2(0.5f, 0.5f);
             buttonRect.anchoredPosition = anchoredPosition;
-            buttonRect.sizeDelta = new Vector2(320f, 70f);
+            buttonRect.sizeDelta = new Vector2(330f, 74f);
 
             Image buttonImage = buttonObject.GetComponent<Image>();
-            buttonImage.color = new Color(0.20f, 0.40f, 0.62f, 1f);
+            buttonImage.sprite = ActiveTheme != null ? ActiveTheme.ButtonSprite : null;
+            buttonImage.color = ActiveTheme != null ? ActiveTheme.ButtonColor : new Color(0.20f, 0.40f, 0.62f, 1f);
 
             Button button = buttonObject.GetComponent<Button>();
             button.targetGraphic = buttonImage;
             button.onClick.AddListener(onPressed);
+
+            if (iconSprite != null)
+            {
+                CreateIcon(buttonObject.transform, iconSprite);
+            }
 
             GameObject labelObject = new GameObject("Label", typeof(RectTransform), typeof(Text));
             labelObject.transform.SetParent(buttonObject.transform, false);
@@ -131,16 +169,35 @@ namespace PuzzleDungeon.UI
             RectTransform labelRect = labelObject.GetComponent<RectTransform>();
             labelRect.anchorMin = new Vector2(0f, 0f);
             labelRect.anchorMax = new Vector2(1f, 1f);
-            labelRect.offsetMin = Vector2.zero;
+            labelRect.offsetMin = iconSprite != null ? new Vector2(54f, 0f) : Vector2.zero;
             labelRect.offsetMax = Vector2.zero;
 
             Text labelText = labelObject.GetComponent<Text>();
             labelText.text = label;
-            labelText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            labelText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             labelText.fontSize = 30;
             labelText.fontStyle = FontStyle.Bold;
             labelText.alignment = TextAnchor.MiddleCenter;
-            labelText.color = Color.white;
+            labelText.color = ActiveTheme != null ? ActiveTheme.TextColor : Color.white;
+            labelText.raycastTarget = false;
+        }
+
+        private static void CreateIcon(Transform parent, Sprite iconSprite)
+        {
+            GameObject iconObject = new GameObject("Icon", typeof(RectTransform), typeof(Image));
+            iconObject.transform.SetParent(parent, false);
+
+            RectTransform iconRect = iconObject.GetComponent<RectTransform>();
+            iconRect.anchorMin = new Vector2(0f, 0.5f);
+            iconRect.anchorMax = new Vector2(0f, 0.5f);
+            iconRect.pivot = new Vector2(0.5f, 0.5f);
+            iconRect.anchoredPosition = new Vector2(54f, 0f);
+            iconRect.sizeDelta = new Vector2(34f, 34f);
+
+            Image iconImage = iconObject.GetComponent<Image>();
+            iconImage.sprite = iconSprite;
+            iconImage.color = Color.white;
+            iconImage.raycastTarget = false;
         }
     }
 }
