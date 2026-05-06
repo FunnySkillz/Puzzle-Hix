@@ -16,6 +16,7 @@ namespace PuzzleDungeon.Tests.PlayMode
     public class RuntimeSmokeTests
     {
         private const string MainMenuSceneName = "MainMenu";
+        private const string LevelMapSceneName = "LevelMap";
         private const string PuzzleBoardSceneName = "PuzzleBoard";
         private const string CurrentLevelKey = "PuzzleDungeon.CurrentLevelIndex";
         private const string UnlockedLevelKey = "PuzzleDungeon.UnlockedLevelIndex";
@@ -43,7 +44,7 @@ namespace PuzzleDungeon.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator StartFlow_LoadsPuzzleBoardAndBuildsLevelOneBoard()
+        public IEnumerator StartFlow_LoadsLevelMapThenPuzzleBoardAndBuildsLevelOneBoard()
         {
             Screen.SetResolution(1080, 1920, false);
             SceneManager.LoadScene(MainMenuSceneName);
@@ -53,6 +54,18 @@ namespace PuzzleDungeon.Tests.PlayMode
             Assert.That(mainMenuController, Is.Not.Null);
 
             mainMenuController.OnStartGame();
+            yield return WaitForScene(LevelMapSceneName, 3f);
+            yield return null;
+
+            LevelMapController levelMapController = Object.FindObjectOfType<LevelMapController>();
+            Assert.That(levelMapController, Is.Not.Null);
+            Assert.That(GameObject.Find("PlayerLevelText"), Is.Not.Null);
+            Assert.That(GameObject.Find("XpText"), Is.Not.Null);
+            Assert.That(GameObject.Find("TotalStarsText"), Is.Not.Null);
+            Assert.That(GameObject.Find("LevelNode_01").GetComponent<Button>().interactable, Is.True);
+            Assert.That(GameObject.Find("LevelNode_02").GetComponent<Button>().interactable, Is.False);
+
+            levelMapController.StartLevel(0);
             yield return WaitForScene(PuzzleBoardSceneName, 3f);
             yield return null;
 
@@ -66,6 +79,33 @@ namespace PuzzleDungeon.Tests.PlayMode
             Assert.That(GameObject.Find("MovesText"), Is.Not.Null);
             Assert.That(Resources.FindObjectsOfTypeAll<Button>().Any(button => button.name == "RetryButton"), Is.True);
             Assert.That(Resources.FindObjectsOfTypeAll<Button>().Any(button => button.name == "NextButton"), Is.True);
+        }
+
+        [UnityTest]
+        public IEnumerator LevelMap_AllowsReplayOfCompletedLevelsAndBlocksLockedLevels()
+        {
+            SceneManager.LoadScene(LevelMapSceneName);
+            yield return null;
+
+            LevelMapController levelMapController = Object.FindObjectOfType<LevelMapController>();
+            Assert.That(levelMapController.GetNodeState(0).IsUnlocked, Is.True);
+            Assert.That(levelMapController.GetNodeState(1).IsUnlocked, Is.False);
+
+            levelMapController.StartLevel(1);
+            yield return null;
+            Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo(LevelMapSceneName));
+
+            PlayerPrefs.SetInt(UnlockedLevelKey, 1);
+            PlayerPrefs.SetInt("PuzzleDungeon.Stars.match3_level_01", 2);
+            PlayerPrefs.Save();
+            levelMapController.RefreshMap();
+
+            Assert.That(levelMapController.GetNodeState(0).IsCompleted, Is.True);
+            Assert.That(levelMapController.GetNodeState(0).Stars, Is.EqualTo(2));
+            Assert.That(levelMapController.GetNodeState(1).IsUnlocked, Is.True);
+
+            levelMapController.StartLevel(0);
+            yield return WaitForScene(PuzzleBoardSceneName, 3f);
         }
 
         [UnityTest]
@@ -190,6 +230,9 @@ namespace PuzzleDungeon.Tests.PlayMode
             Assert.That(boardManager.IsGameOver, Is.True);
             Assert.That(boardManager.HasWon, Is.True);
             Assert.That(GameObject.Find("EndGameTitle").GetComponent<Text>().text, Is.EqualTo("Level Complete"));
+            Assert.That(boardManager.LastLevelResult, Is.Not.Null);
+            Assert.That(boardManager.LastLevelResult.Stars, Is.GreaterThanOrEqualTo(1));
+            Assert.That(PlayerPrefs.GetInt("PuzzleDungeon.PlayerXp", 0), Is.GreaterThan(0));
 
             boardManager.GoToNextLevel();
             yield return null;
@@ -205,14 +248,45 @@ namespace PuzzleDungeon.Tests.PlayMode
             Assert.That(boardManager.CurrentScore, Is.EqualTo(0));
 
             boardManager.ReturnToMenu();
-            yield return WaitForScene(MainMenuSceneName, 3f);
+            yield return WaitForScene(LevelMapSceneName, 3f);
+            yield return null;
 
-            Object.FindObjectOfType<MainMenuController>().OnStartGame();
+            LevelMapController levelMapController = Object.FindObjectOfType<LevelMapController>();
+            Assert.That(levelMapController.GetNodeState(0).IsCompleted, Is.True);
+            Assert.That(levelMapController.GetNodeState(1).IsUnlocked, Is.True);
+
+            levelMapController.StartLevel(1);
             yield return WaitForScene(PuzzleBoardSceneName, 3f);
             yield return null;
 
             BoardManager resumedBoard = Object.FindObjectOfType<BoardManager>();
             Assert.That(resumedBoard.CurrentLevelNumber, Is.EqualTo(2));
+        }
+
+        [UnityTest]
+        public IEnumerator RetryReplay_DoesNotDuplicateStarsOrXp()
+        {
+            SceneManager.LoadScene(PuzzleBoardSceneName);
+            yield return null;
+
+            BoardManager boardManager = Object.FindObjectOfType<BoardManager>();
+            boardManager.SetBoardForTesting(CreatePlayableBoard(), 25, 10);
+            yield return null;
+
+            yield return PlayFirstValidSwap(boardManager);
+
+            int starsAfterFirstWin = PlayerPrefs.GetInt("PuzzleDungeon.Stars.match3_level_01", 0);
+            int xpAfterFirstWin = PlayerPrefs.GetInt("PuzzleDungeon.PlayerXp", 0);
+
+            boardManager.RetryCurrentLevel();
+            yield return null;
+            boardManager.SetBoardForTesting(CreatePlayableBoard(), 25, 10);
+            yield return null;
+            yield return PlayFirstValidSwap(boardManager);
+
+            Assert.That(PlayerPrefs.GetInt("PuzzleDungeon.Stars.match3_level_01", 0), Is.EqualTo(starsAfterFirstWin));
+            Assert.That(PlayerPrefs.GetInt("PuzzleDungeon.PlayerXp", 0), Is.EqualTo(xpAfterFirstWin));
+            Assert.That(boardManager.LastLevelResult.XpAwarded, Is.EqualTo(0));
         }
 
         [UnityTest]
@@ -357,6 +431,10 @@ namespace PuzzleDungeon.Tests.PlayMode
             PlayerPrefs.DeleteKey(CurrentLevelKey);
             PlayerPrefs.DeleteKey(UnlockedLevelKey);
             PlayerPrefs.DeleteKey("PuzzleDungeon.BestMove.match3_level_01");
+            PlayerPrefs.DeleteKey("PuzzleDungeon.Stars.match3_level_01");
+            PlayerPrefs.DeleteKey("PuzzleDungeon.PlayerXp");
+            PlayerPrefs.DeleteKey("PuzzleDungeon.PlayerLevel");
+            PlayerPrefs.DeleteKey("PuzzleDungeon.TotalStars");
             PlayerPrefs.Save();
         }
     }

@@ -11,13 +11,32 @@ namespace PuzzleDungeon.Tests.EditMode.Match3
         private const string CurrentLevelKey = "PuzzleDungeon.CurrentLevelIndex";
         private const string UnlockedLevelKey = "PuzzleDungeon.UnlockedLevelIndex";
         private const string BestMoveKey = "PuzzleDungeon.BestMove.match3_level_01";
+        private const string StarKey = "PuzzleDungeon.Stars.match3_level_01";
+        private const string PlayerXpKey = "PuzzleDungeon.PlayerXp";
+        private const string PlayerLevelKey = "PuzzleDungeon.PlayerLevel";
+        private const string TotalStarsKey = "PuzzleDungeon.TotalStars";
+
+        [SetUp]
+        public void SetUp()
+        {
+            ClearProgress();
+        }
 
         [TearDown]
         public void TearDown()
         {
+            ClearProgress();
+        }
+
+        private static void ClearProgress()
+        {
             PlayerPrefs.DeleteKey(CurrentLevelKey);
             PlayerPrefs.DeleteKey(UnlockedLevelKey);
             PlayerPrefs.DeleteKey(BestMoveKey);
+            PlayerPrefs.DeleteKey(StarKey);
+            PlayerPrefs.DeleteKey(PlayerXpKey);
+            PlayerPrefs.DeleteKey(PlayerLevelKey);
+            PlayerPrefs.DeleteKey(TotalStarsKey);
             PlayerPrefs.Save();
         }
 
@@ -114,6 +133,77 @@ namespace PuzzleDungeon.Tests.EditMode.Match3
             Assert.That(saveService.GetUnlockedLevelIndex(), Is.EqualTo(1));
             Assert.That(saveService.TryGetBestMoveCount("match3_level_01", out bestMoves), Is.True);
             Assert.That(bestMoves, Is.EqualTo(7));
+        }
+
+        [Test]
+        public void LevelResult_CalculatesOneTwoAndThreeStarWins()
+        {
+            Match3LevelData level = CreateLevel(ObjectiveType.Score, 20, 1000, null, 0);
+
+            Assert.That(LevelResult.CalculateStars(level, false, 2000, 20), Is.EqualTo(StarRating.None));
+            Assert.That(LevelResult.CalculateStars(level, true, 1000, 0), Is.EqualTo(StarRating.One));
+            Assert.That(LevelResult.CalculateStars(level, true, 1250, 0), Is.EqualTo(StarRating.Two));
+            Assert.That(LevelResult.CalculateStars(level, true, 1500, 0), Is.EqualTo(StarRating.Three));
+            Assert.That(LevelResult.CalculateStars(level, true, 1000, 7), Is.EqualTo(StarRating.Three));
+        }
+
+        [Test]
+        public void ProgressService_StarsXpAndPlayerLevel_DoNotRegressOrDuplicate()
+        {
+            SaveService saveService = new SaveService();
+            Match3ProgressService progressService = new Match3ProgressService(saveService);
+            Match3LevelData level = CreateLevel(ObjectiveType.Score, 20, 1000, null, 0);
+
+            LevelResult firstResult = progressService.CompleteLevel(level, 0, 20, 1500, 8, 12, 2);
+            int xpAfterFirstWin = saveService.GetPlayerXp();
+
+            LevelResult replayResult = progressService.CompleteLevel(level, 0, 20, 1500, 8, 12, 2);
+
+            Assert.That(firstResult.Stars, Is.EqualTo(3));
+            Assert.That(firstResult.XpAwarded, Is.GreaterThan(0));
+            Assert.That(saveService.GetLevelStars(level.LevelId), Is.EqualTo(3));
+            Assert.That(saveService.GetTotalStars(), Is.EqualTo(3));
+            Assert.That(saveService.GetPlayerXp(), Is.EqualTo(xpAfterFirstWin));
+            Assert.That(saveService.GetPlayerLevel(), Is.EqualTo(PlayerProgressData.CalculatePlayerLevel(xpAfterFirstWin)));
+            Assert.That(replayResult.XpAwarded, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ProgressService_BuildsLevelMapNodeStates()
+        {
+            Match3LevelCatalog catalog = Match3LevelCatalog.LoadDefault();
+            SaveService saveService = new SaveService();
+            Match3ProgressService progressService = new Match3ProgressService(saveService);
+
+            saveService.SetUnlockedLevelIndex(1);
+            saveService.SetCurrentLevelIndex(1);
+            saveService.SetLevelStars("match3_level_01", 2);
+
+            LevelMapNodeState[] nodes = progressService.BuildLevelMap(catalog);
+
+            Assert.That(nodes[0].IsUnlocked, Is.True);
+            Assert.That(nodes[0].IsCompleted, Is.True);
+            Assert.That(nodes[0].Stars, Is.EqualTo(2));
+            Assert.That(nodes[1].IsUnlocked, Is.True);
+            Assert.That(nodes[1].IsCurrent, Is.True);
+            Assert.That(nodes[2].IsUnlocked, Is.False);
+        }
+
+        [Test]
+        public void AudioService_WithMissingClips_DoesNotThrow()
+        {
+            GameObject gameObject = new GameObject("AudioServiceTest", typeof(AudioService));
+            AudioService audioService = gameObject.GetComponent<AudioService>();
+
+            Assert.DoesNotThrow(() =>
+            {
+                audioService.Play(AudioCue.ButtonClick);
+                audioService.Play(AudioCue.Swap);
+                audioService.Play(AudioCue.MatchClear);
+                audioService.Play(AudioCue.Win);
+            });
+
+            Object.DestroyImmediate(gameObject);
         }
 
         private static Match3LevelData CreateLevel(ObjectiveType objectiveType, int moves, int targetScore, ColorGoal[] goals, int clearTarget)

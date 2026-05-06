@@ -12,6 +12,10 @@ namespace PuzzleDungeon.Tests.EditMode
         private const string CurrentLevelKey = "PuzzleDungeon.CurrentLevelIndex";
         private const string UnlockedLevelKey = "PuzzleDungeon.UnlockedLevelIndex";
         private const string BestMovePrefix = "PuzzleDungeon.BestMove.";
+        private const string StarPrefix = "PuzzleDungeon.Stars.";
+        private const string PlayerXpKey = "PuzzleDungeon.PlayerXp";
+        private const string PlayerLevelKey = "PuzzleDungeon.PlayerLevel";
+        private const string TotalStarsKey = "PuzzleDungeon.TotalStars";
 
         private readonly string[] bestMoveLevelIds =
         {
@@ -109,10 +113,14 @@ namespace PuzzleDungeon.Tests.EditMode
         {
             PlayerPrefs.DeleteKey(CurrentLevelKey);
             PlayerPrefs.DeleteKey(UnlockedLevelKey);
+            PlayerPrefs.DeleteKey(PlayerXpKey);
+            PlayerPrefs.DeleteKey(PlayerLevelKey);
+            PlayerPrefs.DeleteKey(TotalStarsKey);
 
             for (int i = 0; i < bestMoveLevelIds.Length; i++)
             {
                 PlayerPrefs.DeleteKey($"{BestMovePrefix}{bestMoveLevelIds[i]}");
+                PlayerPrefs.DeleteKey($"{StarPrefix}{bestMoveLevelIds[i]}");
             }
 
             PlayerPrefs.Save();
