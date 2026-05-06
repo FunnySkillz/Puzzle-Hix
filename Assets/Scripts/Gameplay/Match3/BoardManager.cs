@@ -28,6 +28,7 @@ namespace PuzzleDungeon.Gameplay.Match3
         private AudioService audioService;
         private Match3ProgressService progressService;
         private IMatch3AnalyticsSink analyticsSink;
+        private readonly BoardActionQueue actionQueue = new BoardActionQueue();
         private Match3LevelData currentLevel;
         private int currentWidth;
         private int currentHeight;
@@ -321,317 +322,57 @@ namespace PuzzleDungeon.Gameplay.Match3
 
         public static PieceType[,] GenerateBoardTypes(int width, int height, PieceType[] availableTypes, int? seed = null)
         {
-            width = Mathf.Max(3, width);
-            height = Mathf.Max(3, height);
-            PieceType[] types = NormalizeTypes(availableTypes);
-            System.Random random = seed.HasValue ? new System.Random(seed.Value) : new System.Random();
-            PieceType[,] fallback = BuildFallbackBoard(width, height, types);
-
-            for (int attempt = 0; attempt < 250; attempt++)
-            {
-                PieceType?[,] working = new PieceType?[width, height];
-
-                for (int y = 0; y < height; y++)
-                {
-                    for (int x = 0; x < width; x++)
-                    {
-                        working[x, y] = PickSafeType(working, x, y, types, random);
-                    }
-                }
-
-                if (!HasAnyMatches(working) && TryFindPossibleMove(working, out _, out _))
-                {
-                    return ToConcreteBoard(working, types[0]);
-                }
-            }
-
-            return fallback;
+            return Match3BoardModel.GenerateBoardTypes(width, height, availableTypes, seed);
         }
 
         public static List<MatchResult> FindMatches(PieceType?[,] board)
         {
-            List<MatchResult> results = new List<MatchResult>();
-            List<MatchResult> horizontalResults = new List<MatchResult>();
-            List<MatchResult> verticalResults = new List<MatchResult>();
-            int width = board.GetLength(0);
-            int height = board.GetLength(1);
-
-            for (int y = 0; y < height; y++)
-            {
-                int x = 0;
-
-                while (x < width)
-                {
-                    PieceType? type = board[x, y];
-
-                    if (!type.HasValue)
-                    {
-                        x++;
-                        continue;
-                    }
-
-                    int start = x;
-
-                    while (x < width && board[x, y].HasValue && board[x, y].Value == type.Value)
-                    {
-                        x++;
-                    }
-
-                    int length = x - start;
-
-                    if (length >= 3)
-                    {
-                        List<Vector2Int> positions = new List<Vector2Int>();
-
-                        for (int matchX = start; matchX < x; matchX++)
-                        {
-                            positions.Add(new Vector2Int(matchX, y));
-                        }
-
-                        horizontalResults.Add(new MatchResult(positions, true, false, false, false));
-                    }
-                }
-            }
-
-            for (int x = 0; x < width; x++)
-            {
-                int y = 0;
-
-                while (y < height)
-                {
-                    PieceType? type = board[x, y];
-
-                    if (!type.HasValue)
-                    {
-                        y++;
-                        continue;
-                    }
-
-                    int start = y;
-
-                    while (y < height && board[x, y].HasValue && board[x, y].Value == type.Value)
-                    {
-                        y++;
-                    }
-
-                    int length = y - start;
-
-                    if (length >= 3)
-                    {
-                        List<Vector2Int> positions = new List<Vector2Int>();
-
-                        for (int matchY = start; matchY < y; matchY++)
-                        {
-                            positions.Add(new Vector2Int(x, matchY));
-                        }
-
-                        verticalResults.Add(new MatchResult(positions, false, true, false, false));
-                    }
-                }
-            }
-
-            results.AddRange(horizontalResults);
-            results.AddRange(verticalResults);
-            AddShapeMatches(results, horizontalResults, verticalResults);
-            return results;
+            return Match3BoardModel.FindMatches(board);
         }
 
         public static HashSet<Vector2Int> CollectMatchedPositions(IEnumerable<MatchResult> matches)
         {
-            HashSet<Vector2Int> positions = new HashSet<Vector2Int>();
-
-            foreach (MatchResult match in matches)
-            {
-                for (int i = 0; i < match.MatchedPositions.Count; i++)
-                {
-                    positions.Add(match.MatchedPositions[i]);
-                }
-            }
-
-            return positions;
+            return Match3BoardModel.CollectMatchedPositions(matches);
         }
 
         public static bool HasAnyMatches(PieceType?[,] board)
         {
-            return FindMatches(board).Count > 0;
+            return Match3BoardModel.HasAnyMatches(board);
         }
 
         public static bool SwapCreatesMatch(PieceType?[,] board, Vector2Int from, Vector2Int to)
         {
-            int width = board.GetLength(0);
-            int height = board.GetLength(1);
-
-            if (!IsInBounds(from.x, from.y, width, height) ||
-                !IsInBounds(to.x, to.y, width, height) ||
-                !AreAdjacent(from, to) ||
-                !board[from.x, from.y].HasValue ||
-                !board[to.x, to.y].HasValue)
-            {
-                return false;
-            }
-
-            PieceType? fromType = board[from.x, from.y];
-            board[from.x, from.y] = board[to.x, to.y];
-            board[to.x, to.y] = fromType;
-
-            List<MatchResult> matches = FindMatches(board);
-            bool createsMatch = ContainsMatchAt(matches, from) || ContainsMatchAt(matches, to);
-
-            PieceType? backType = board[from.x, from.y];
-            board[from.x, from.y] = board[to.x, to.y];
-            board[to.x, to.y] = backType;
-            return createsMatch;
+            return Match3BoardModel.SwapCreatesMatch(board, from, to);
         }
 
         public static bool TryFindPossibleMove(PieceType?[,] board, out Vector2Int from, out Vector2Int to)
         {
-            int width = board.GetLength(0);
-            int height = board.GetLength(1);
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    Vector2Int current = new Vector2Int(x, y);
-
-                    if (x + 1 < width)
-                    {
-                        Vector2Int right = new Vector2Int(x + 1, y);
-
-                        if (SwapCreatesMatch(board, current, right))
-                        {
-                            from = current;
-                            to = right;
-                            return true;
-                        }
-                    }
-
-                    if (y + 1 < height)
-                    {
-                        Vector2Int up = new Vector2Int(x, y + 1);
-
-                        if (SwapCreatesMatch(board, current, up))
-                        {
-                            from = current;
-                            to = up;
-                            return true;
-                        }
-                    }
-                }
-            }
-
-            from = default;
-            to = default;
-            return false;
+            return Match3BoardModel.TryFindPossibleMove(board, out from, out to);
         }
 
         public static void CollapseAndFillTypes(PieceType?[,] board, PieceType[] availableTypes, int? seed = null)
         {
-            PieceType[] types = NormalizeTypes(availableTypes);
-            System.Random random = seed.HasValue ? new System.Random(seed.Value) : new System.Random();
-            int width = board.GetLength(0);
-            int height = board.GetLength(1);
-
-            for (int x = 0; x < width; x++)
-            {
-                int writeY = 0;
-
-                for (int y = 0; y < height; y++)
-                {
-                    if (board[x, y].HasValue)
-                    {
-                        board[x, writeY] = board[x, y];
-
-                        if (writeY != y)
-                        {
-                            board[x, y] = null;
-                        }
-
-                        writeY++;
-                    }
-                }
-
-                while (writeY < height)
-                {
-                    board[x, writeY] = types[random.Next(types.Length)];
-                    writeY++;
-                }
-            }
+            Match3BoardModel.CollapseAndFillTypes(board, availableTypes, seed);
         }
 
         public static int ResolveBoardTypesForTesting(PieceType?[,] board, PieceType[] availableTypes, int? seed, out int cascades)
         {
-            int totalScore = 0;
-            int multiplier = 1;
-            cascades = 0;
-
-            for (int safety = 0; safety < 50; safety++)
-            {
-                List<MatchResult> matches = FindMatches(board);
-
-                if (matches.Count == 0)
-                {
-                    return totalScore;
-                }
-
-                HashSet<Vector2Int> positions = CollectMatchedPositions(matches);
-
-                foreach (Vector2Int position in positions)
-                {
-                    board[position.x, position.y] = null;
-                }
-
-                totalScore += positions.Count * 10 * multiplier;
-                CollapseAndFillTypes(board, availableTypes, seed.HasValue ? seed.Value + safety : null);
-                cascades++;
-                multiplier++;
-            }
-
-            return totalScore;
+            return Match3BoardModel.ResolveBoardTypesForTesting(board, availableTypes, seed, out cascades);
         }
 
         public static PieceType?[,] ToNullableBoard(PieceType[,] concreteBoard)
         {
-            int width = concreteBoard.GetLength(0);
-            int height = concreteBoard.GetLength(1);
-            PieceType?[,] nullableBoard = new PieceType?[width, height];
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    nullableBoard[x, y] = concreteBoard[x, y];
-                }
-            }
-
-            return nullableBoard;
+            return Match3BoardModel.ToNullableBoard(concreteBoard);
         }
 
         public static bool AreAdjacent(Vector2Int from, Vector2Int to)
         {
-            return Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y) == 1;
+            return Match3BoardModel.AreAdjacent(from, to);
         }
 
         public static SpecialPieceType DetermineSpecialPieceType(IEnumerable<MatchResult> matches, Vector2Int preferredPosition)
         {
-            SpecialPieceType bestType = SpecialPieceType.None;
-
-            foreach (MatchResult match in matches)
-            {
-                if (!match.MatchedPositions.Contains(preferredPosition) && bestType != SpecialPieceType.None)
-                {
-                    continue;
-                }
-
-                SpecialPieceType candidate = GetSpecialPieceTypeForMatch(match);
-
-                if (GetSpecialPriority(candidate) > GetSpecialPriority(bestType))
-                {
-                    bestType = candidate;
-                }
-            }
-
-            return bestType;
+            return Match3BoardModel.DetermineSpecialPieceType(matches, preferredPosition);
         }
 
         private void StartLevel(int levelIndex, bool saveCurrentLevel)
@@ -654,7 +395,8 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
 
             PieceType[] availableTypes = ActiveConfig.GetAvailablePieceTypes(currentLevel.AvailablePieceTypeCount);
-            PieceType[,] boardTypes = GenerateBoardTypes(currentLevel.Width, currentLevel.Height, availableTypes);
+            int? boardSeed = ActiveConfig.UseDeterministicSeed ? ActiveConfig.GetSeedForLevel(currentLevel.LevelNumber) : (int?)null;
+            PieceType[,] boardTypes = GenerateBoardTypes(currentLevel.Width, currentLevel.Height, availableTypes, boardSeed);
             BuildBoardFromTypes(boardTypes);
 
             selectedPiece = null;
@@ -672,18 +414,24 @@ namespace PuzzleDungeon.Gameplay.Match3
         private IEnumerator AttemptSwapRoutine(Piece first, Piece second)
         {
             inputBlocked = true;
+            actionQueue.Clear();
             SelectPiece(null);
 
             Vector2Int firstStart = new Vector2Int(first.GridX, first.GridY);
             Vector2Int secondStart = new Vector2Int(second.GridX, second.GridY);
+            actionQueue.Enqueue(new BoardAction(BoardActionType.Swap, firstStart, secondStart));
+            actionQueue.TryStartNext(out _);
 
             audioService.Play(AudioCue.Swap);
             yield return SwapPieces(first, second, ActiveConfig.SwapDuration);
+            actionQueue.CompleteCurrent();
 
             List<MatchResult> matches = FindMatches(ToTypeBoard());
 
             if (matches.Count == 0 || (!ContainsMatchAt(matches, firstStart) && !ContainsMatchAt(matches, secondStart)))
             {
+                actionQueue.Enqueue(new BoardAction(BoardActionType.InvalidSwap, firstStart, secondStart));
+                actionQueue.TryStartNext(out _);
                 uiManager.SetStatus("No match. Try another swap.");
                 audioService.Play(AudioCue.InvalidSwap);
                 Vector2 offset = new Vector2(secondStart.x - firstStart.x, secondStart.y - firstStart.y) * 14f;
@@ -696,8 +444,11 @@ namespace PuzzleDungeon.Gameplay.Match3
                 }
 
                 yield return SwapPieces(first, second, ActiveConfig.SwapDuration);
+                actionQueue.CompleteCurrent();
+                actionQueue.Enqueue(BoardAction.Simple(BoardActionType.InputUnlock));
                 analyticsSink.SwapResolved(CurrentLevelNumber, false, MovesRemaining, CurrentScore);
                 inputBlocked = false;
+                actionQueue.Clear();
                 yield break;
             }
 
@@ -717,6 +468,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
 
             inputBlocked = gameManager.IsGameOver;
+            actionQueue.Clear();
             lastInputTime = Time.time;
         }
 
@@ -730,15 +482,18 @@ namespace PuzzleDungeon.Gameplay.Match3
             {
                 HashSet<Vector2Int> matchedPositions = CollectMatchedPositions(matches);
                 HashSet<Vector2Int> expandedPositions = ExpandMatchedPositionsForSpecials(matchedPositions, out bool activatedSpecial);
+                actionQueue.Enqueue(new BoardAction(BoardActionType.Clear, Vector2Int.zero, Vector2Int.zero, expandedPositions.Count, createdSpecialType));
 
                 if (multiplier > 1)
                 {
+                    actionQueue.Enqueue(new BoardAction(BoardActionType.Cascade, Vector2Int.zero, Vector2Int.zero, expandedPositions.Count));
                     gameManager.RecordCascade();
                     audioService.Play(AudioCue.Cascade);
                 }
 
                 if (activatedSpecial)
                 {
+                    actionQueue.Enqueue(new BoardAction(BoardActionType.SpecialActivate, Vector2Int.zero, Vector2Int.zero, expandedPositions.Count));
                     audioService.Play(AudioCue.SpecialActivate);
 
                     if (ActiveConfig.SpecialActivationPause > 0f)
@@ -756,6 +511,7 @@ namespace PuzzleDungeon.Gameplay.Match3
                 uiManager.ShowFloatingFeedback(multiplier == 1 ? $"+{scoreGain}" : $"x{multiplier} +{scoreGain}", Vector2.zero, Color.white, ActiveConfig.FloatingFeedbackDuration);
 
                 yield return ApplyGravityAndSpawn();
+                actionQueue.Enqueue(BoardAction.Simple(BoardActionType.Gravity));
 
                 if (ActiveConfig.CascadeDelay > 0f)
                 {
@@ -876,6 +632,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
 
             uiManager.SetStatus("No moves available. Reshuffling.");
+            actionQueue.Enqueue(BoardAction.Simple(BoardActionType.Reshuffle));
 
             if (ActiveConfig.CascadeDelay > 0f)
             {
@@ -883,7 +640,8 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
 
             PieceType[] availableTypes = ActiveConfig.GetAvailablePieceTypes(currentLevel != null ? currentLevel.AvailablePieceTypeCount : 6);
-            PieceType[,] boardTypes = GenerateBoardTypes(currentWidth, currentHeight, availableTypes);
+            int? boardSeed = ActiveConfig.UseDeterministicSeed ? ActiveConfig.GetSeedForLevel(CurrentLevelNumber + 1000) : (int?)null;
+            PieceType[,] boardTypes = GenerateBoardTypes(currentWidth, currentHeight, availableTypes, boardSeed);
             BuildBoardFromTypes(boardTypes);
         }
 
@@ -1240,56 +998,6 @@ namespace PuzzleDungeon.Gameplay.Match3
             return matches.Count > 0 && matches[0].MatchedPositions.Count > 0 ? matches[0].MatchedPositions[0] : firstPreferred;
         }
 
-        private static void AddShapeMatches(List<MatchResult> results, List<MatchResult> horizontalResults, List<MatchResult> verticalResults)
-        {
-            for (int h = 0; h < horizontalResults.Count; h++)
-            {
-                for (int v = 0; v < verticalResults.Count; v++)
-                {
-                    Vector2Int? intersection = FindIntersection(horizontalResults[h], verticalResults[v]);
-
-                    if (!intersection.HasValue)
-                    {
-                        continue;
-                    }
-
-                    HashSet<Vector2Int> shapePositions = new HashSet<Vector2Int>(horizontalResults[h].MatchedPositions);
-
-                    for (int i = 0; i < verticalResults[v].MatchedPositions.Count; i++)
-                    {
-                        shapePositions.Add(verticalResults[v].MatchedPositions[i]);
-                    }
-
-                    bool horizontalMiddle = IsMiddle(horizontalResults[h], intersection.Value);
-                    bool verticalMiddle = IsMiddle(verticalResults[v], intersection.Value);
-                    bool isTShape = horizontalMiddle || verticalMiddle;
-                    results.Add(new MatchResult(shapePositions, true, true, isTShape, !isTShape));
-                }
-            }
-        }
-
-        private static Vector2Int? FindIntersection(MatchResult first, MatchResult second)
-        {
-            for (int i = 0; i < first.MatchedPositions.Count; i++)
-            {
-                for (int j = 0; j < second.MatchedPositions.Count; j++)
-                {
-                    if (first.MatchedPositions[i] == second.MatchedPositions[j])
-                    {
-                        return first.MatchedPositions[i];
-                    }
-                }
-            }
-
-            return null;
-        }
-
-        private static bool IsMiddle(MatchResult match, Vector2Int position)
-        {
-            int index = match.MatchedPositions.IndexOf(position);
-            return index > 0 && index < match.MatchedPositions.Count - 1;
-        }
-
         private static bool ContainsMatchAt(IEnumerable<MatchResult> matches, Vector2Int position)
         {
             foreach (MatchResult match in matches)
@@ -1301,42 +1009,6 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
 
             return false;
-        }
-
-        private static SpecialPieceType GetSpecialPieceTypeForMatch(MatchResult match)
-        {
-            if (match.IsTShape || match.IsLShape)
-            {
-                return SpecialPieceType.Bomb;
-            }
-
-            if (match.MatchSize >= 5)
-            {
-                return SpecialPieceType.ColorClear;
-            }
-
-            if (match.MatchSize >= 4)
-            {
-                return match.IsVertical ? SpecialPieceType.LineVertical : SpecialPieceType.LineHorizontal;
-            }
-
-            return SpecialPieceType.None;
-        }
-
-        private static int GetSpecialPriority(SpecialPieceType specialType)
-        {
-            switch (specialType)
-            {
-                case SpecialPieceType.ColorClear:
-                    return 4;
-                case SpecialPieceType.Bomb:
-                    return 3;
-                case SpecialPieceType.LineHorizontal:
-                case SpecialPieceType.LineVertical:
-                    return 2;
-                default:
-                    return 0;
-            }
         }
 
         private static string DescribeSpecial(SpecialPieceType specialType)
@@ -1356,91 +1028,6 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
         }
 
-        private static PieceType PickSafeType(PieceType?[,] board, int x, int y, PieceType[] types, System.Random random)
-        {
-            for (int attempt = 0; attempt < 40; attempt++)
-            {
-                PieceType candidate = types[random.Next(types.Length)];
-
-                if (!WouldCreateImmediateMatch(board, x, y, candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            for (int i = 0; i < types.Length; i++)
-            {
-                if (!WouldCreateImmediateMatch(board, x, y, types[i]))
-                {
-                    return types[i];
-                }
-            }
-
-            return types[0];
-        }
-
-        private static bool WouldCreateImmediateMatch(PieceType?[,] board, int x, int y, PieceType type)
-        {
-            bool horizontal = x >= 2 &&
-                              board[x - 1, y].HasValue &&
-                              board[x - 2, y].HasValue &&
-                              board[x - 1, y].Value == type &&
-                              board[x - 2, y].Value == type;
-
-            bool vertical = y >= 2 &&
-                            board[x, y - 1].HasValue &&
-                            board[x, y - 2].HasValue &&
-                            board[x, y - 1].Value == type &&
-                            board[x, y - 2].Value == type;
-
-            return horizontal || vertical;
-        }
-
-        private static PieceType[,] BuildFallbackBoard(int width, int height, PieceType[] types)
-        {
-            PieceType[,] board = new PieceType[width, height];
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    board[x, y] = types[((x * 2) + (y * 3)) % types.Length];
-                }
-            }
-
-            board[0, 0] = types[0];
-            board[1, 0] = types[1];
-            board[2, 0] = types[0];
-            board[1, 1] = types[0];
-            return board;
-        }
-
-        private static PieceType[,] ToConcreteBoard(PieceType?[,] nullableBoard, PieceType fallback)
-        {
-            int width = nullableBoard.GetLength(0);
-            int height = nullableBoard.GetLength(1);
-            PieceType[,] board = new PieceType[width, height];
-
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    board[x, y] = nullableBoard[x, y].HasValue ? nullableBoard[x, y].Value : fallback;
-                }
-            }
-
-            return board;
-        }
-
-        private static PieceType[] NormalizeTypes(PieceType[] availableTypes)
-        {
-            if (availableTypes != null && availableTypes.Length >= 3)
-            {
-                return availableTypes;
-            }
-
-            return new[] { PieceType.Red, PieceType.Blue, PieceType.Green, PieceType.Yellow, PieceType.Purple, PieceType.Orange };
-        }
 
         private static bool IsInBounds(int x, int y, int width, int height)
         {

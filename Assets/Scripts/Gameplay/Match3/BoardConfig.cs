@@ -36,6 +36,10 @@ namespace PuzzleDungeon.Gameplay.Match3
         [SerializeField] private float floatingFeedbackDuration = 0.75f;
         [SerializeField] private float matchPopScale = 1.16f;
 
+        [Header("Debug")]
+        [SerializeField] private bool useDeterministicSeed;
+        [SerializeField] private int deterministicSeed = 12037;
+
         [Header("Piece Colors")]
         [SerializeField] private Color redColor = new Color(0.90f, 0.22f, 0.20f, 1f);
         [SerializeField] private Color blueColor = new Color(0.22f, 0.50f, 0.95f, 1f);
@@ -62,6 +66,13 @@ namespace PuzzleDungeon.Gameplay.Match3
         public float SpecialActivationPause => Mathf.Max(0f, specialActivationPause);
         public float FloatingFeedbackDuration => Mathf.Max(0.1f, floatingFeedbackDuration);
         public float MatchPopScale => Mathf.Max(1f, matchPopScale);
+        public bool UseDeterministicSeed => useDeterministicSeed;
+        public int DeterministicSeed => deterministicSeed;
+
+        public int GetSeedForLevel(int levelNumber)
+        {
+            return deterministicSeed + (Mathf.Max(1, levelNumber) * 9973);
+        }
 
         public PieceType[] GetAvailablePieceTypes()
         {

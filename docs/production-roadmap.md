@@ -14,10 +14,11 @@
 - Asset/license register for the zero-cost production constraint.
 - Production service interfaces and local/mock implementations for analytics, ads, IAP, consent, remote config, economy, inventory, boosters, cosmetics, and launch policy.
 - Catalog data types for future boosters, skins, store products, ad placements, remote tuning, daily rewards, missions, and level packs.
+- Sprint 1 architecture hardening started: pure match-3 board model, deterministic board seeds, action queue, and 1,000-move simulation tests.
 
 ## Next Sprint Order
 
-1. Core architecture hardening: split match-3 board rules from UI-heavy board presentation.
+1. Finish core architecture hardening: migrate more runtime resolution state from `BoardManager` into the pure board model.
 2. Mobile UX pass: safe areas, portrait layout, TextMeshPro, level preview, and tutorial.
 3. Game feel pass: polished animations, SFX, special-piece effects, settings toggles.
 4. Gameplay depth: blockers, special combinations, and earned boosters.
