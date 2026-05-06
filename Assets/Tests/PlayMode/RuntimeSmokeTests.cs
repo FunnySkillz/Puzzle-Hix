@@ -11,12 +11,26 @@ using UnityEngine.UI;
 namespace PuzzleDungeon.Tests.PlayMode
 {
     /// <summary>
-    /// Validates the menu flow and the active match-3 prototype scene.
+    /// Validates the menu flow and the active match-3 MVP prototype scene.
     /// </summary>
     public class RuntimeSmokeTests
     {
         private const string MainMenuSceneName = "MainMenu";
         private const string PuzzleBoardSceneName = "PuzzleBoard";
+        private const string CurrentLevelKey = "PuzzleDungeon.CurrentLevelIndex";
+        private const string UnlockedLevelKey = "PuzzleDungeon.UnlockedLevelIndex";
+
+        [SetUp]
+        public void SetUp()
+        {
+            ClearProgress();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            ClearProgress();
+        }
 
         [UnityTest]
         public IEnumerator MainMenuScene_LoadsWithController()
@@ -29,8 +43,9 @@ namespace PuzzleDungeon.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator StartFlow_LoadsPuzzleBoardAndBuildsMatch3Board()
+        public IEnumerator StartFlow_LoadsPuzzleBoardAndBuildsLevelOneBoard()
         {
+            Screen.SetResolution(1080, 1920, false);
             SceneManager.LoadScene(MainMenuSceneName);
             yield return null;
 
@@ -44,11 +59,13 @@ namespace PuzzleDungeon.Tests.PlayMode
             BoardManager boardManager = Object.FindObjectOfType<BoardManager>();
             Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo(PuzzleBoardSceneName));
             Assert.That(boardManager, Is.Not.Null);
+            Assert.That(boardManager.CurrentLevelNumber, Is.EqualTo(1));
             Assert.That(Object.FindObjectsOfType<Piece>().Length, Is.EqualTo(64));
-            Assert.That(GameObject.Find("ScoreText"), Is.Not.Null);
+            Assert.That(GameObject.Find("LevelText"), Is.Not.Null);
+            Assert.That(GameObject.Find("ObjectiveText"), Is.Not.Null);
             Assert.That(GameObject.Find("MovesText"), Is.Not.Null);
-            Assert.That(GameObject.Find("TargetText"), Is.Not.Null);
-            Assert.That(Resources.FindObjectsOfTypeAll<Button>().Any(button => button.name == "RestartButton"), Is.True);
+            Assert.That(Resources.FindObjectsOfTypeAll<Button>().Any(button => button.name == "RetryButton"), Is.True);
+            Assert.That(Resources.FindObjectsOfTypeAll<Button>().Any(button => button.name == "NextButton"), Is.True);
         }
 
         [UnityTest]
@@ -119,6 +136,24 @@ namespace PuzzleDungeon.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator MatchFour_CreatesReadableSpecialPiece()
+        {
+            SceneManager.LoadScene(PuzzleBoardSceneName);
+            yield return null;
+
+            BoardManager boardManager = Object.FindObjectOfType<BoardManager>();
+            boardManager.SetBoardForTesting(CreateMatchFourBoard(), 25, 999999);
+            yield return null;
+
+            boardManager.HandlePieceClicked(boardManager.GetPieceAt(1, 0));
+            boardManager.HandlePieceClicked(boardManager.GetPieceAt(1, 1));
+            yield return WaitUntilStable(boardManager);
+
+            Assert.That(Object.FindObjectsOfType<Piece>().Any(piece => piece.SpecialPieceType != SpecialPieceType.None), Is.True);
+            AssertBoardIsFilledAndSynchronized(boardManager, 5, 5);
+        }
+
+        [UnityTest]
         public IEnumerator DragSwap_UsesDominantCardinalDirection()
         {
             SceneManager.LoadScene(PuzzleBoardSceneName);
@@ -137,10 +172,11 @@ namespace PuzzleDungeon.Tests.PlayMode
 
             Assert.That(boardManager.MovesRemaining, Is.EqualTo(startingMoves - 1));
             Assert.That(boardManager.CurrentScore, Is.GreaterThan(0));
+            AssertBoardIsFilledAndSynchronized(boardManager, 8, 8);
         }
 
         [UnityTest]
-        public IEnumerator WinLossAndRestart_EndStatesWork()
+        public IEnumerator WinNextRetryAndResumeProgression_WorkFromPuzzleBoard()
         {
             SceneManager.LoadScene(PuzzleBoardSceneName);
             yield return null;
@@ -155,23 +191,52 @@ namespace PuzzleDungeon.Tests.PlayMode
             Assert.That(boardManager.HasWon, Is.True);
             Assert.That(GameObject.Find("EndGameTitle").GetComponent<Text>().text, Is.EqualTo("Level Complete"));
 
-            boardManager.StartNewGame();
+            boardManager.GoToNextLevel();
             yield return null;
+
+            Assert.That(boardManager.CurrentLevelNumber, Is.EqualTo(2));
             Assert.That(boardManager.IsGameOver, Is.False);
             Assert.That(boardManager.CurrentScore, Is.EqualTo(0));
-            Assert.That(boardManager.MovesRemaining, Is.EqualTo(25));
 
+            boardManager.RetryCurrentLevel();
+            yield return null;
+
+            Assert.That(boardManager.CurrentLevelNumber, Is.EqualTo(2));
+            Assert.That(boardManager.CurrentScore, Is.EqualTo(0));
+
+            boardManager.ReturnToMenu();
+            yield return WaitForScene(MainMenuSceneName, 3f);
+
+            Object.FindObjectOfType<MainMenuController>().OnStartGame();
+            yield return WaitForScene(PuzzleBoardSceneName, 3f);
+            yield return null;
+
+            BoardManager resumedBoard = Object.FindObjectOfType<BoardManager>();
+            Assert.That(resumedBoard.CurrentLevelNumber, Is.EqualTo(2));
+        }
+
+        [UnityTest]
+        public IEnumerator LossAndRetry_ResetLevelState()
+        {
+            SceneManager.LoadScene(PuzzleBoardSceneName);
+            yield return null;
+
+            BoardManager boardManager = Object.FindObjectOfType<BoardManager>();
             boardManager.SetBoardForTesting(CreatePlayableBoard(), 1, 999999);
             yield return null;
+
             yield return PlayFirstValidSwap(boardManager);
 
             Assert.That(boardManager.IsGameOver, Is.True);
             Assert.That(boardManager.HasWon, Is.False);
             Assert.That(GameObject.Find("EndGameTitle").GetComponent<Text>().text, Is.EqualTo("Game Over"));
 
-            boardManager.StartNewGame();
+            boardManager.RetryCurrentLevel();
             yield return null;
+
             Assert.That(boardManager.IsGameOver, Is.False);
+            Assert.That(boardManager.CurrentScore, Is.EqualTo(0));
+            Assert.That(boardManager.MovesRemaining, Is.GreaterThan(0));
             Assert.That(Object.FindObjectsOfType<Piece>().Length, Is.EqualTo(64));
         }
 
@@ -192,6 +257,8 @@ namespace PuzzleDungeon.Tests.PlayMode
 
                 yield return null;
             }
+
+            Assert.Fail("Board did not finish resolving within the timeout.");
         }
 
         private static IEnumerator WaitUntilStable(BoardManager boardManager)
@@ -233,6 +300,31 @@ namespace PuzzleDungeon.Tests.PlayMode
             return BoardManager.GenerateBoardTypes(8, 8, AllTypes(), 1234);
         }
 
+        private static PieceType[,] CreateMatchFourBoard()
+        {
+            PieceType R = PieceType.Red;
+            PieceType B = PieceType.Blue;
+            PieceType G = PieceType.Green;
+            PieceType Y = PieceType.Yellow;
+            PieceType P = PieceType.Purple;
+            PieceType[,] board = new PieceType[5, 5];
+
+            SetRow(board, 0, new[] { R, B, R, R, G });
+            SetRow(board, 1, new[] { B, R, G, Y, P });
+            SetRow(board, 2, new[] { G, Y, P, B, R });
+            SetRow(board, 3, new[] { Y, P, B, G, Y });
+            SetRow(board, 4, new[] { P, B, Y, R, B });
+            return board;
+        }
+
+        private static void SetRow(PieceType[,] board, int y, PieceType[] row)
+        {
+            for (int x = 0; x < row.Length; x++)
+            {
+                board[x, y] = row[x];
+            }
+        }
+
         private static PieceType[] AllTypes()
         {
             return new[]
@@ -258,6 +350,14 @@ namespace PuzzleDungeon.Tests.PlayMode
                     Assert.That(piece.GridY, Is.EqualTo(y));
                 }
             }
+        }
+
+        private static void ClearProgress()
+        {
+            PlayerPrefs.DeleteKey(CurrentLevelKey);
+            PlayerPrefs.DeleteKey(UnlockedLevelKey);
+            PlayerPrefs.DeleteKey("PuzzleDungeon.BestMove.match3_level_01");
+            PlayerPrefs.Save();
         }
     }
 }
