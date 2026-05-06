@@ -21,9 +21,11 @@ MonoBehaviour:
   targetScore: 1000
   dragThreshold: 42
   swapDuration: 0.12
+  invalidSwapDuration: 0.16
   clearDuration: 0.1
   fallDuration: 0.16
   cascadeDelay: 0.08
+  hintDelay: 5
   redColor: {r: 0.9, g: 0.22, b: 0.2, a: 1}
   blueColor: {r: 0.22, g: 0.5, b: 0.95, a: 1}
   greenColor: {r: 0.28, g: 0.72, b: 0.38, a: 1}

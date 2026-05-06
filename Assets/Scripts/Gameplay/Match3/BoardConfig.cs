@@ -25,9 +25,11 @@ namespace PuzzleDungeon.Gameplay.Match3
         [Header("Input and Timing")]
         [SerializeField] private float dragThreshold = 42f;
         [SerializeField] private float swapDuration = 0.12f;
+        [SerializeField] private float invalidSwapDuration = 0.16f;
         [SerializeField] private float clearDuration = 0.10f;
         [SerializeField] private float fallDuration = 0.16f;
         [SerializeField] private float cascadeDelay = 0.08f;
+        [SerializeField] private float hintDelay = 5f;
 
         [Header("Piece Colors")]
         [SerializeField] private Color redColor = new Color(0.90f, 0.22f, 0.20f, 1f);
@@ -45,14 +47,30 @@ namespace PuzzleDungeon.Gameplay.Match3
         public int TargetScore => Mathf.Max(10, targetScore);
         public float DragThreshold => Mathf.Max(10f, dragThreshold);
         public float SwapDuration => Mathf.Max(0f, swapDuration);
+        public float InvalidSwapDuration => Mathf.Max(0f, invalidSwapDuration);
         public float ClearDuration => Mathf.Max(0f, clearDuration);
         public float FallDuration => Mathf.Max(0f, fallDuration);
         public float CascadeDelay => Mathf.Max(0f, cascadeDelay);
+        public float HintDelay => Mathf.Max(1f, hintDelay);
 
         public PieceType[] GetAvailablePieceTypes()
         {
             PieceType[] allTypes = (PieceType[])Enum.GetValues(typeof(PieceType));
             int count = Mathf.Clamp(availablePieceTypeCount, 3, allTypes.Length);
+            PieceType[] result = new PieceType[count];
+
+            for (int i = 0; i < count; i++)
+            {
+                result[i] = allTypes[i];
+            }
+
+            return result;
+        }
+
+        public PieceType[] GetAvailablePieceTypes(int countOverride)
+        {
+            PieceType[] allTypes = (PieceType[])Enum.GetValues(typeof(PieceType));
+            int count = Mathf.Clamp(countOverride, 3, allTypes.Length);
             PieceType[] result = new PieceType[count];
 
             for (int i = 0; i < count; i++)

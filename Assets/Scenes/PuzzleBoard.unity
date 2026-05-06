@@ -251,3 +251,4 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   config: {fileID: 11400000, guid: 7a6426d9a8704a1f94a1c2e1ad26990a, type: 2}
   theme: {fileID: 11400000, guid: 4f7b32ac4de94e36ad9f32fc1f5c8dc2, type: 2}
+  levelCatalog: {fileID: 11400000, guid: 91d95ea2813f4ababbb462ded5dfce5e, type: 2}

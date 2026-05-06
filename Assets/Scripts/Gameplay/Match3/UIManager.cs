@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using PuzzleDungeon.UI;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -9,7 +10,7 @@ using UnityEngine.UI;
 namespace PuzzleDungeon.Gameplay.Match3
 {
     /// <summary>
-    /// Creates and updates the lightweight UI used by the match-3 prototype.
+    /// Creates and updates the lightweight UI used by the match-3 MVP prototype.
     /// </summary>
     [DisallowMultipleComponent]
     public class UIManager : MonoBehaviour
@@ -19,11 +20,14 @@ namespace PuzzleDungeon.Gameplay.Match3
         private PrototypeTheme theme;
         private BoardManager boardManager;
         private Canvas canvas;
+        private Text levelText;
         private Text scoreText;
         private Text movesText;
         private Text targetText;
+        private Text objectiveText;
         private Text statusText;
         private GameObject endGamePanel;
+        private GameObject nextButtonObject;
         private Text endGameTitleText;
 
         public Transform CanvasTransform => canvas != null ? canvas.transform : null;
@@ -38,8 +42,13 @@ namespace PuzzleDungeon.Gameplay.Match3
             HideEndGame();
         }
 
-        public void UpdateHud(int score, int moves, int target)
+        public void UpdateHud(int score, int moves, int target, int levelNumber, string objectiveSummary)
         {
+            if (levelText != null)
+            {
+                levelText.text = $"Level {levelNumber}";
+            }
+
             if (scoreText != null)
             {
                 scoreText.text = $"Score: {score}";
@@ -53,6 +62,11 @@ namespace PuzzleDungeon.Gameplay.Match3
             if (targetText != null)
             {
                 targetText.text = $"Target: {target}";
+            }
+
+            if (objectiveText != null)
+            {
+                objectiveText.text = objectiveSummary;
             }
         }
 
@@ -73,7 +87,13 @@ namespace PuzzleDungeon.Gameplay.Match3
 
             endGamePanel.SetActive(true);
             endGameTitleText.text = won ? "Level Complete" : "Game Over";
-            SetStatus(won ? "Target score reached." : "No moves left.");
+
+            if (nextButtonObject != null)
+            {
+                nextButtonObject.SetActive(won && boardManager != null && boardManager.HasNextLevel);
+            }
+
+            SetStatus(won ? "Objective complete." : "No moves left.");
         }
 
         public void HideEndGame()
@@ -81,6 +101,21 @@ namespace PuzzleDungeon.Gameplay.Match3
             if (endGamePanel != null)
             {
                 endGamePanel.SetActive(false);
+            }
+        }
+
+        public void ShowFloatingFeedback(string message, Vector2 anchoredPosition, Color color)
+        {
+            StartCoroutine(FloatingFeedbackRoutine(message, anchoredPosition, color));
+        }
+
+        public void ShowPieceBurst(Vector2 anchoredPosition, Color color)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                float angle = (Mathf.PI * 2f * i) / 6f;
+                Vector2 direction = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+                StartCoroutine(BurstDotRoutine(anchoredPosition, direction, color));
             }
         }
 
@@ -143,24 +178,34 @@ namespace PuzzleDungeon.Gameplay.Match3
 
         private void EnsureHud()
         {
+            if (levelText == null)
+            {
+                levelText = CreateTopText("LevelText", new Vector2(-405f, -24f), new Vector2(190f, 50f), 26);
+            }
+
             if (scoreText == null)
             {
-                scoreText = CreateTopText("ScoreText", new Vector2(-300f, -26f), new Vector2(260f, 54f), 28);
+                scoreText = CreateTopText("ScoreText", new Vector2(-145f, -24f), new Vector2(230f, 50f), 26);
             }
 
             if (movesText == null)
             {
-                movesText = CreateTopText("MovesText", new Vector2(0f, -26f), new Vector2(260f, 54f), 28);
+                movesText = CreateTopText("MovesText", new Vector2(125f, -24f), new Vector2(230f, 50f), 26);
             }
 
             if (targetText == null)
             {
-                targetText = CreateTopText("TargetText", new Vector2(300f, -26f), new Vector2(260f, 54f), 28);
+                targetText = CreateTopText("TargetText", new Vector2(390f, -24f), new Vector2(230f, 50f), 26);
+            }
+
+            if (objectiveText == null)
+            {
+                objectiveText = CreateTopText("ObjectiveText", new Vector2(0f, -78f), new Vector2(920f, 48f), 23);
             }
 
             if (statusText == null)
             {
-                statusText = CreateTopText("StatusText", new Vector2(0f, -88f), new Vector2(840f, 54f), 24);
+                statusText = CreateTopText("StatusText", new Vector2(0f, -124f), new Vector2(920f, 46f), 22);
                 statusText.text = "Swap adjacent pieces to match 3 or more.";
             }
 
@@ -202,17 +247,18 @@ namespace PuzzleDungeon.Gameplay.Match3
             rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
             rect.anchoredPosition = Vector2.zero;
-            rect.sizeDelta = new Vector2(760f, 320f);
+            rect.sizeDelta = new Vector2(820f, 340f);
 
             Image image = panelObject.GetComponent<Image>();
             image.sprite = theme != null ? theme.PanelSprite : null;
             image.color = theme != null ? theme.PanelColor : new Color(0f, 0f, 0f, 0.86f);
 
-            endGameTitleText = CreateCenteredText(panelObject.transform, "EndGameTitle", "Level Complete", new Vector2(0f, 66f), new Vector2(680f, 72f), 44);
+            endGameTitleText = CreateCenteredText(panelObject.transform, "EndGameTitle", "Level Complete", new Vector2(0f, 76f), new Vector2(720f, 72f), 44);
             endGameTitleText.fontStyle = FontStyle.Bold;
 
-            CreateButton(panelObject.transform, "RestartButton", "Restart", new Vector2(-100f, -86f), theme != null ? theme.RetryIconSprite : null, () => boardManager.StartNewGame());
-            CreateButton(panelObject.transform, "MenuButton", "Menu", new Vector2(110f, -86f), theme != null ? theme.MenuIconSprite : null, () => SceneManager.LoadScene(MainMenuSceneName));
+            CreateButton(panelObject.transform, "RetryButton", "Retry", new Vector2(-225f, -88f), theme != null ? theme.RetryIconSprite : null, () => boardManager.RetryCurrentLevel());
+            nextButtonObject = CreateButton(panelObject.transform, "NextButton", "Next", new Vector2(0f, -88f), theme != null ? theme.NextIconSprite : null, () => boardManager.GoToNextLevel());
+            CreateButton(panelObject.transform, "MenuButton", "Menu", new Vector2(225f, -88f), theme != null ? theme.MenuIconSprite : null, () => SceneManager.LoadScene(MainMenuSceneName));
 
             panelObject.SetActive(false);
             return panelObject;
@@ -240,7 +286,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             return text;
         }
 
-        private void CreateButton(Transform parent, string name, string label, Vector2 anchoredPosition, Sprite iconSprite, Action onPressed)
+        private GameObject CreateButton(Transform parent, string name, string label, Vector2 anchoredPosition, Sprite iconSprite, Action onPressed)
         {
             GameObject buttonObject = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
             buttonObject.transform.SetParent(parent, false);
@@ -267,6 +313,7 @@ namespace PuzzleDungeon.Gameplay.Match3
 
             Text text = CreateCenteredText(buttonObject.transform, "Label", label, iconSprite != null ? new Vector2(24f, 0f) : Vector2.zero, new Vector2(130f, 46f), 24);
             text.fontStyle = FontStyle.Bold;
+            return buttonObject;
         }
 
         private static void CreateIcon(Transform parent, Sprite iconSprite)
@@ -285,6 +332,63 @@ namespace PuzzleDungeon.Gameplay.Match3
             image.sprite = iconSprite;
             image.color = Color.white;
             image.raycastTarget = false;
+        }
+
+        private IEnumerator FloatingFeedbackRoutine(string message, Vector2 anchoredPosition, Color color)
+        {
+            Text text = CreateCenteredText(canvas.transform, "FloatingFeedback", message, anchoredPosition, new Vector2(260f, 56f), 30);
+            text.fontStyle = FontStyle.Bold;
+            text.color = color;
+
+            RectTransform rect = text.GetComponent<RectTransform>();
+            float duration = 0.75f;
+            float elapsed = 0f;
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                rect.anchoredPosition = anchoredPosition + new Vector2(0f, Mathf.Lerp(0f, 80f, t));
+                Color faded = color;
+                faded.a = 1f - t;
+                text.color = faded;
+                yield return null;
+            }
+
+            Destroy(text.gameObject);
+        }
+
+        private IEnumerator BurstDotRoutine(Vector2 anchoredPosition, Vector2 direction, Color color)
+        {
+            GameObject dotObject = new GameObject("MatchBurstDot", typeof(RectTransform), typeof(Image));
+            dotObject.transform.SetParent(canvas.transform, false);
+
+            RectTransform rect = dotObject.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = new Vector2(12f, 12f);
+
+            Image image = dotObject.GetComponent<Image>();
+            image.color = color;
+            image.raycastTarget = false;
+
+            float duration = 0.35f;
+            float elapsed = 0f;
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                rect.anchoredPosition = anchoredPosition + (direction * Mathf.Lerp(0f, 56f, t));
+                Color faded = color;
+                faded.a = 1f - t;
+                image.color = faded;
+                yield return null;
+            }
+
+            Destroy(dotObject);
         }
     }
 }

@@ -22,9 +22,10 @@ namespace PuzzleDungeon.Gameplay.Match3
         public int GridX { get; private set; }
         public int GridY { get; private set; }
         public PieceType Type { get; private set; }
+        public SpecialPieceType SpecialPieceType { get; private set; }
         public bool IsSelected { get; private set; }
 
-        public void Initialize(BoardManager boardManager, int gridX, int gridY, PieceType pieceType, Sprite sprite, Color color)
+        public void Initialize(BoardManager boardManager, int gridX, int gridY, PieceType pieceType, SpecialPieceType specialType, Sprite sprite, Color color)
         {
             owner = boardManager;
             rectTransform = GetComponent<RectTransform>();
@@ -33,13 +34,14 @@ namespace PuzzleDungeon.Gameplay.Match3
             GridX = gridX;
             GridY = gridY;
             Type = pieceType;
+            SpecialPieceType = specialType;
 
             image.sprite = sprite;
             image.color = color;
             image.raycastTarget = true;
 
             EnsureLabel();
-            label.text = ResolveLabel(pieceType);
+            label.text = ResolveLabel(pieceType, specialType);
             label.color = Color.white;
 
             SetSelected(false);
@@ -51,13 +53,27 @@ namespace PuzzleDungeon.Gameplay.Match3
             GridY = gridY;
         }
 
-        public void SetType(PieceType pieceType, Sprite sprite, Color color)
+        public void SetType(PieceType pieceType, SpecialPieceType specialType, Sprite sprite, Color color)
         {
             Type = pieceType;
+            SpecialPieceType = specialType;
             image.sprite = sprite;
             image.color = color;
             EnsureLabel();
-            label.text = ResolveLabel(pieceType);
+            label.text = ResolveLabel(pieceType, specialType);
+        }
+
+        public void SetSpecialPieceType(SpecialPieceType specialType)
+        {
+            SpecialPieceType = specialType;
+            EnsureLabel();
+            label.text = ResolveLabel(Type, SpecialPieceType);
+            RectTransform rect = RectTransform;
+
+            if (rect != null)
+            {
+                rect.localScale = SpecialPieceType == SpecialPieceType.None ? baseScale : baseScale * 1.08f;
+            }
         }
 
         public void SetAnchoredPosition(Vector2 anchoredPosition)
@@ -146,6 +162,56 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
         }
 
+        public IEnumerator AnimateInvalidBounce(Vector2 offset, float duration)
+        {
+            RectTransform rect = RectTransform;
+
+            if (rect == null)
+            {
+                yield break;
+            }
+
+            Vector2 start = rect.anchoredPosition;
+            Vector2 peak = start + offset;
+            float halfDuration = Mathf.Max(0.01f, duration * 0.5f);
+
+            yield return AnimateTo(peak, halfDuration);
+            yield return AnimateTo(start, halfDuration);
+        }
+
+        public IEnumerator AnimateHintPulse(float duration)
+        {
+            RectTransform rect = RectTransform;
+
+            if (rect == null)
+            {
+                yield break;
+            }
+
+            Vector3 startScale = rect.localScale;
+            Vector3 peakScale = startScale * 1.16f;
+            float elapsed = 0f;
+
+            while (elapsed < duration)
+            {
+                if (rect == null)
+                {
+                    yield break;
+                }
+
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float wave = Mathf.Sin(t * Mathf.PI);
+                rect.localScale = Vector3.Lerp(startScale, peakScale, wave);
+                yield return null;
+            }
+
+            if (rect != null)
+            {
+                rect.localScale = IsSelected ? baseScale * 1.12f : startScale;
+            }
+        }
+
         public void SetSelected(bool selected)
         {
             IsSelected = selected;
@@ -209,9 +275,23 @@ namespace PuzzleDungeon.Gameplay.Match3
             label.raycastTarget = false;
         }
 
-        private static string ResolveLabel(PieceType pieceType)
+        private static string ResolveLabel(PieceType pieceType, SpecialPieceType specialType)
         {
-            return pieceType.ToString().Substring(0, 1);
+            string typeLabel = pieceType.ToString().Substring(0, 1);
+
+            switch (specialType)
+            {
+                case SpecialPieceType.LineHorizontal:
+                    return $"{typeLabel}H";
+                case SpecialPieceType.LineVertical:
+                    return $"{typeLabel}V";
+                case SpecialPieceType.Bomb:
+                    return $"{typeLabel}B";
+                case SpecialPieceType.ColorClear:
+                    return $"{typeLabel}C";
+                default:
+                    return typeLabel;
+            }
         }
 
         private static float Smooth(float value)

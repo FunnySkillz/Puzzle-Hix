@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using PuzzleDungeon.Services;
 using PuzzleDungeon.UI;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -8,7 +9,7 @@ using UnityEngine.UI;
 namespace PuzzleDungeon.Gameplay.Match3
 {
     /// <summary>
-    /// Owns board generation, input, swapping, match detection, gravity, spawning, cascades, and dead-board handling.
+    /// Owns board generation, input, swapping, match detection, special pieces, gravity, cascades, and level flow.
     /// </summary>
     [DisallowMultipleComponent]
     public class BoardManager : MonoBehaviour
@@ -17,22 +18,36 @@ namespace PuzzleDungeon.Gameplay.Match3
 
         [SerializeField] private BoardConfig config;
         [SerializeField] private PrototypeTheme theme;
+        [SerializeField] private Match3LevelCatalog levelCatalog;
 
         private Piece[,] pieces;
         private Piece selectedPiece;
         private Transform boardRoot;
         private GameManager gameManager;
         private UIManager uiManager;
+        private Match3ProgressService progressService;
+        private IMatch3AnalyticsSink analyticsSink;
+        private Match3LevelData currentLevel;
         private int currentWidth;
         private int currentHeight;
+        private int currentLevelIndex;
         private bool inputBlocked;
+        private bool hintRoutineRunning;
+        private bool levelEndReported;
+        private float levelStartTime;
+        private float lastInputTime;
 
         public bool IsInputBlocked => inputBlocked;
         public int CurrentScore => gameManager != null ? gameManager.Score : 0;
         public int MovesRemaining => gameManager != null ? gameManager.MovesRemaining : 0;
+        public int MovesUsed => gameManager != null ? gameManager.MovesUsed : 0;
         public int TargetScore => gameManager != null ? gameManager.TargetScore : 0;
+        public int CurrentLevelIndex => currentLevelIndex;
+        public int CurrentLevelNumber => currentLevel != null ? currentLevel.LevelNumber : 1;
+        public ObjectiveType CurrentObjectiveType => gameManager != null ? gameManager.ObjectiveType : ObjectiveType.Score;
         public bool IsGameOver => gameManager != null && gameManager.IsGameOver;
         public bool HasWon => gameManager != null && gameManager.HasWon;
+        public bool HasNextLevel => ActiveLevelCatalog != null && currentLevelIndex + 1 < ActiveLevelCatalog.LevelCount;
 
         private BoardConfig ActiveConfig
         {
@@ -65,25 +80,60 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
         }
 
+        private Match3LevelCatalog ActiveLevelCatalog
+        {
+            get
+            {
+                if (levelCatalog == null)
+                {
+                    levelCatalog = Match3LevelCatalog.LoadDefault();
+                }
+
+                return levelCatalog;
+            }
+        }
+
         private void Awake()
         {
             EnsureManagers();
             StartNewGame();
         }
 
+        private void Update()
+        {
+            if (inputBlocked || IsGameOver || hintRoutineRunning || pieces == null)
+            {
+                return;
+            }
+
+            if (Time.time - lastInputTime >= ActiveConfig.HintDelay)
+            {
+                StartCoroutine(HintRoutine());
+            }
+        }
+
         public void StartNewGame()
         {
-            StopAllCoroutines();
             EnsureManagers();
+            int levelCount = ActiveLevelCatalog != null ? ActiveLevelCatalog.LevelCount : 1;
+            int savedIndex = progressService.GetCurrentLevelIndex(levelCount);
+            StartLevel(savedIndex, false);
+        }
 
-            BoardConfig activeConfig = ActiveConfig;
-            PieceType[,] boardTypes = GenerateBoardTypes(activeConfig.Width, activeConfig.Height, activeConfig.GetAvailablePieceTypes());
-            BuildBoardFromTypes(boardTypes);
+        public void RetryCurrentLevel()
+        {
+            analyticsSink.LevelRetried(CurrentLevelNumber);
+            StartLevel(currentLevelIndex, true);
+        }
 
-            selectedPiece = null;
-            inputBlocked = false;
-            gameManager.Initialize(activeConfig, uiManager);
-            uiManager.SetStatus("Swap adjacent pieces to match 3 or more.");
+        public void GoToNextLevel()
+        {
+            if (!HasNextLevel)
+            {
+                return;
+            }
+
+            StartLevel(currentLevelIndex + 1, true);
         }
 
         public void ReturnToMenu()
@@ -97,6 +147,8 @@ namespace PuzzleDungeon.Gameplay.Match3
             {
                 return;
             }
+
+            lastInputTime = Time.time;
 
             if (selectedPiece == null)
             {
@@ -128,6 +180,7 @@ namespace PuzzleDungeon.Gameplay.Match3
                 return;
             }
 
+            lastInputTime = Time.time;
             Vector2Int direction;
 
             if (Mathf.Abs(dragDelta.x) >= Mathf.Abs(dragDelta.y))
@@ -163,6 +216,16 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
 
             return pieces[x, y];
+        }
+
+        public int GetCollectedCount(PieceType pieceType)
+        {
+            return gameManager != null ? gameManager.GetCollectedCount(pieceType) : 0;
+        }
+
+        public int GetColorGoal(PieceType pieceType)
+        {
+            return gameManager != null ? gameManager.GetColorGoal(pieceType) : 0;
         }
 
         public bool TryFindFirstValidSwap(out Vector2Int from, out Vector2Int to)
@@ -217,11 +280,33 @@ namespace PuzzleDungeon.Gameplay.Match3
         {
             StopAllCoroutines();
             EnsureManagers();
+            currentLevelIndex = 0;
+            currentLevel = ScriptableObject.CreateInstance<Match3LevelData>();
+            currentLevel.ConfigureForTesting(1, boardTypes.GetLength(0), boardTypes.GetLength(1), moves, targetScore, 6, ObjectiveType.Score, null, 0);
             BuildBoardFromTypes(boardTypes);
             selectedPiece = null;
             inputBlocked = false;
-            gameManager.InitializeForTest(moves, targetScore, uiManager);
+            levelEndReported = false;
+            levelStartTime = Time.time;
+            lastInputTime = Time.time;
+            gameManager.Initialize(currentLevel, ActiveConfig, uiManager);
             uiManager.SetStatus("Test board ready.");
+        }
+
+        public void SetLevelForTesting(Match3LevelData level, PieceType[,] boardTypes)
+        {
+            StopAllCoroutines();
+            EnsureManagers();
+            currentLevelIndex = Mathf.Max(0, level != null ? level.LevelNumber - 1 : 0);
+            currentLevel = level != null ? level : CreateFallbackLevel();
+            BuildBoardFromTypes(boardTypes);
+            selectedPiece = null;
+            inputBlocked = false;
+            levelEndReported = false;
+            levelStartTime = Time.time;
+            lastInputTime = Time.time;
+            gameManager.Initialize(currentLevel, ActiveConfig, uiManager);
+            uiManager.SetStatus("Test level ready.");
         }
 
         public static PieceType[,] GenerateBoardTypes(int width, int height, PieceType[] availableTypes, int? seed = null)
@@ -379,7 +464,8 @@ namespace PuzzleDungeon.Gameplay.Match3
             board[from.x, from.y] = board[to.x, to.y];
             board[to.x, to.y] = fromType;
 
-            bool createsMatch = HasAnyMatches(board);
+            List<MatchResult> matches = FindMatches(board);
+            bool createsMatch = ContainsMatchAt(matches, from) || ContainsMatchAt(matches, to);
 
             PieceType? backType = board[from.x, from.y];
             board[from.x, from.y] = board[to.x, to.y];
@@ -516,43 +602,128 @@ namespace PuzzleDungeon.Gameplay.Match3
             return Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y) == 1;
         }
 
+        public static SpecialPieceType DetermineSpecialPieceType(IEnumerable<MatchResult> matches, Vector2Int preferredPosition)
+        {
+            SpecialPieceType bestType = SpecialPieceType.None;
+
+            foreach (MatchResult match in matches)
+            {
+                if (!match.MatchedPositions.Contains(preferredPosition) && bestType != SpecialPieceType.None)
+                {
+                    continue;
+                }
+
+                SpecialPieceType candidate = GetSpecialPieceTypeForMatch(match);
+
+                if (GetSpecialPriority(candidate) > GetSpecialPriority(bestType))
+                {
+                    bestType = candidate;
+                }
+            }
+
+            return bestType;
+        }
+
+        private void StartLevel(int levelIndex, bool saveCurrentLevel)
+        {
+            StopAllCoroutines();
+            EnsureManagers();
+
+            Match3LevelCatalog catalog = ActiveLevelCatalog;
+            currentLevelIndex = Mathf.Clamp(levelIndex, 0, Mathf.Max(0, catalog != null ? catalog.LevelCount - 1 : 0));
+            currentLevel = catalog != null ? catalog.GetLevelByIndex(currentLevelIndex) : null;
+
+            if (currentLevel == null)
+            {
+                currentLevel = CreateFallbackLevel();
+            }
+
+            if (saveCurrentLevel)
+            {
+                progressService.SetCurrentLevelIndex(currentLevelIndex, catalog != null ? catalog.LevelCount : 1);
+            }
+
+            PieceType[] availableTypes = ActiveConfig.GetAvailablePieceTypes(currentLevel.AvailablePieceTypeCount);
+            PieceType[,] boardTypes = GenerateBoardTypes(currentLevel.Width, currentLevel.Height, availableTypes);
+            BuildBoardFromTypes(boardTypes);
+
+            selectedPiece = null;
+            inputBlocked = false;
+            hintRoutineRunning = false;
+            levelEndReported = false;
+            levelStartTime = Time.time;
+            lastInputTime = Time.time;
+            gameManager.Initialize(currentLevel, ActiveConfig, uiManager);
+            uiManager.SetStatus($"Level {currentLevel.LevelNumber}: make smart swaps.");
+            analyticsSink.LevelStarted(CurrentLevelNumber, CurrentObjectiveType, MovesRemaining);
+        }
+
         private IEnumerator AttemptSwapRoutine(Piece first, Piece second)
         {
             inputBlocked = true;
             SelectPiece(null);
 
+            Vector2Int firstStart = new Vector2Int(first.GridX, first.GridY);
+            Vector2Int secondStart = new Vector2Int(second.GridX, second.GridY);
+
             yield return SwapPieces(first, second, ActiveConfig.SwapDuration);
 
             List<MatchResult> matches = FindMatches(ToTypeBoard());
 
-            if (matches.Count == 0)
+            if (matches.Count == 0 || (!ContainsMatchAt(matches, firstStart) && !ContainsMatchAt(matches, secondStart)))
             {
                 uiManager.SetStatus("No match. Try another swap.");
+                Vector2 offset = new Vector2(secondStart.x - firstStart.x, secondStart.y - firstStart.y) * 14f;
+                StartCoroutine(first.AnimateInvalidBounce(-offset, ActiveConfig.InvalidSwapDuration));
+                StartCoroutine(second.AnimateInvalidBounce(offset, ActiveConfig.InvalidSwapDuration));
+
+                if (ActiveConfig.InvalidSwapDuration > 0f)
+                {
+                    yield return new WaitForSeconds(ActiveConfig.InvalidSwapDuration);
+                }
+
                 yield return SwapPieces(first, second, ActiveConfig.SwapDuration);
+                analyticsSink.SwapResolved(CurrentLevelNumber, false, MovesRemaining, CurrentScore);
                 inputBlocked = false;
                 yield break;
             }
 
             gameManager.ConsumeMove();
-            yield return ResolveMatches(matches);
+            Vector2Int specialPosition = SelectSpecialCreationPosition(matches, firstStart, secondStart);
+            SpecialPieceType createdSpecialType = DetermineSpecialPieceType(matches, specialPosition);
+            yield return ResolveMatches(matches, createdSpecialType, specialPosition);
             yield return EnsurePlayableBoard();
 
-            gameManager.EvaluateEndState();
+            analyticsSink.SwapResolved(CurrentLevelNumber, true, MovesRemaining, CurrentScore);
+            bool ended = gameManager.EvaluateEndState();
+
+            if (ended)
+            {
+                HandleLevelEnded();
+            }
+
             inputBlocked = gameManager.IsGameOver;
+            lastInputTime = Time.time;
         }
 
-        private IEnumerator ResolveMatches(List<MatchResult> initialMatches)
+        private IEnumerator ResolveMatches(List<MatchResult> initialMatches, SpecialPieceType createdSpecialType, Vector2Int specialPosition)
         {
             List<MatchResult> matches = initialMatches;
             int multiplier = 1;
+            bool canCreateSpecial = createdSpecialType != SpecialPieceType.None;
 
             while (matches.Count > 0)
             {
                 HashSet<Vector2Int> matchedPositions = CollectMatchedPositions(matches);
-                gameManager.AddScore(matchedPositions.Count * 10 * multiplier);
-                uiManager.SetStatus(multiplier == 1 ? "Match!" : $"Cascade x{multiplier}!");
+                HashSet<Vector2Int> expandedPositions = ExpandMatchedPositionsForSpecials(matchedPositions);
+                List<PieceType> clearedTypes = new List<PieceType>();
+                yield return ClearMatchedPieces(expandedPositions, canCreateSpecial ? specialPosition : (Vector2Int?)null, createdSpecialType, clearedTypes);
 
-                yield return ClearMatchedPieces(matchedPositions);
+                int scoreGain = clearedTypes.Count * 10 * multiplier;
+                gameManager.RecordClearedPieces(clearedTypes, scoreGain);
+                uiManager.SetStatus(multiplier == 1 ? $"Match! +{scoreGain}" : $"Cascade x{multiplier}! +{scoreGain}");
+                uiManager.ShowFloatingFeedback(multiplier == 1 ? $"+{scoreGain}" : $"x{multiplier} +{scoreGain}", Vector2.zero, Color.white);
+
                 yield return ApplyGravityAndSpawn();
 
                 if (ActiveConfig.CascadeDelay > 0f)
@@ -562,10 +733,11 @@ namespace PuzzleDungeon.Gameplay.Match3
 
                 matches = FindMatches(ToTypeBoard());
                 multiplier++;
+                canCreateSpecial = false;
             }
         }
 
-        private IEnumerator ClearMatchedPieces(HashSet<Vector2Int> matchedPositions)
+        private IEnumerator ClearMatchedPieces(HashSet<Vector2Int> matchedPositions, Vector2Int? specialCreationPosition, SpecialPieceType createdSpecialType, List<PieceType> clearedTypes)
         {
             List<Piece> clearingPieces = new List<Piece>();
 
@@ -578,8 +750,17 @@ namespace PuzzleDungeon.Gameplay.Match3
                     continue;
                 }
 
+                if (specialCreationPosition.HasValue && position == specialCreationPosition.Value && createdSpecialType != SpecialPieceType.None)
+                {
+                    piece.SetSpecialPieceType(createdSpecialType);
+                    uiManager.ShowFloatingFeedback(DescribeSpecial(createdSpecialType), GetCanvasPosition(piece), Color.yellow);
+                    continue;
+                }
+
                 pieces[position.x, position.y] = null;
+                clearedTypes.Add(piece.Type);
                 clearingPieces.Add(piece);
+                uiManager.ShowPieceBurst(GetCanvasPosition(piece), ActiveConfig.GetPieceColor(piece.Type));
                 StartCoroutine(piece.AnimateClear(ActiveConfig.ClearDuration));
             }
 
@@ -600,7 +781,7 @@ namespace PuzzleDungeon.Gameplay.Match3
         private IEnumerator ApplyGravityAndSpawn()
         {
             List<Piece> movingPieces = new List<Piece>();
-            PieceType[] types = ActiveConfig.GetAvailablePieceTypes();
+            PieceType[] types = ActiveConfig.GetAvailablePieceTypes(currentLevel != null ? currentLevel.AvailablePieceTypeCount : 6);
 
             for (int x = 0; x < currentWidth; x++)
             {
@@ -629,7 +810,7 @@ namespace PuzzleDungeon.Gameplay.Match3
                 while (writeY < currentHeight)
                 {
                     PieceType type = types[Random.Range(0, types.Length)];
-                    Piece spawnedPiece = CreatePiece(x, writeY, type);
+                    Piece spawnedPiece = CreatePiece(x, writeY, type, SpecialPieceType.None);
                     spawnedPiece.SetAnchoredPosition(GetAnchoredPosition(x, currentHeight + (writeY % 3) + 1));
                     pieces[x, writeY] = spawnedPiece;
                     movingPieces.Add(spawnedPiece);
@@ -663,7 +844,8 @@ namespace PuzzleDungeon.Gameplay.Match3
                 yield return new WaitForSeconds(ActiveConfig.CascadeDelay);
             }
 
-            PieceType[,] boardTypes = GenerateBoardTypes(currentWidth, currentHeight, ActiveConfig.GetAvailablePieceTypes());
+            PieceType[] availableTypes = ActiveConfig.GetAvailablePieceTypes(currentLevel != null ? currentLevel.AvailablePieceTypeCount : 6);
+            PieceType[,] boardTypes = GenerateBoardTypes(currentWidth, currentHeight, availableTypes);
             BuildBoardFromTypes(boardTypes);
         }
 
@@ -706,7 +888,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             {
                 for (int x = 0; x < currentWidth; x++)
                 {
-                    pieces[x, y] = CreatePiece(x, y, boardTypes[x, y]);
+                    pieces[x, y] = CreatePiece(x, y, boardTypes[x, y], SpecialPieceType.None);
                 }
             }
         }
@@ -732,7 +914,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             rect.anchorMin = new Vector2(0.5f, 0.5f);
             rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = new Vector2(0f, -80f);
+            rect.anchoredPosition = new Vector2(0f, -130f);
             rect.sizeDelta = new Vector2(
                 (ActiveConfig.CellSize * currentWidth) + (ActiveConfig.CellSpacing * (currentWidth - 1)),
                 (ActiveConfig.CellSize * currentHeight) + (ActiveConfig.CellSpacing * (currentHeight - 1)));
@@ -761,7 +943,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
         }
 
-        private Piece CreatePiece(int x, int y, PieceType type)
+        private Piece CreatePiece(int x, int y, PieceType type, SpecialPieceType specialType)
         {
             GameObject pieceObject = new GameObject($"Piece_{x}_{y}", typeof(RectTransform), typeof(Image), typeof(Piece));
             pieceObject.transform.SetParent(boardRoot, false);
@@ -772,7 +954,7 @@ namespace PuzzleDungeon.Gameplay.Match3
 
             Piece piece = pieceObject.GetComponent<Piece>();
             Sprite sprite = ActiveTheme != null ? ActiveTheme.TileSprite : null;
-            piece.Initialize(this, x, y, type, sprite, ActiveConfig.GetPieceColor(type));
+            piece.Initialize(this, x, y, type, specialType, sprite, ActiveConfig.GetPieceColor(type));
             return piece;
         }
 
@@ -782,6 +964,19 @@ namespace PuzzleDungeon.Gameplay.Match3
             float originX = -((currentWidth - 1) * pitch * 0.5f);
             float originY = -((currentHeight - 1) * pitch * 0.5f);
             return new Vector2(originX + (x * pitch), originY + (y * pitch));
+        }
+
+        private Vector2 GetCanvasPosition(Piece piece)
+        {
+            RectTransform rootRect = boardRoot as RectTransform;
+            RectTransform pieceRect = piece != null ? piece.GetComponent<RectTransform>() : null;
+
+            if (rootRect == null || pieceRect == null)
+            {
+                return Vector2.zero;
+            }
+
+            return rootRect.anchoredPosition + pieceRect.anchoredPosition;
         }
 
         private void SelectPiece(Piece piece)
@@ -815,6 +1010,116 @@ namespace PuzzleDungeon.Gameplay.Match3
             return board;
         }
 
+        private HashSet<Vector2Int> ExpandMatchedPositionsForSpecials(HashSet<Vector2Int> matchedPositions)
+        {
+            HashSet<Vector2Int> expanded = new HashSet<Vector2Int>(matchedPositions);
+
+            foreach (Vector2Int position in matchedPositions)
+            {
+                Piece piece = pieces[position.x, position.y];
+
+                if (piece == null)
+                {
+                    continue;
+                }
+
+                switch (piece.SpecialPieceType)
+                {
+                    case SpecialPieceType.LineHorizontal:
+                        for (int x = 0; x < currentWidth; x++)
+                        {
+                            expanded.Add(new Vector2Int(x, position.y));
+                        }
+
+                        break;
+                    case SpecialPieceType.LineVertical:
+                        for (int y = 0; y < currentHeight; y++)
+                        {
+                            expanded.Add(new Vector2Int(position.x, y));
+                        }
+
+                        break;
+                    case SpecialPieceType.Bomb:
+                        for (int y = position.y - 1; y <= position.y + 1; y++)
+                        {
+                            for (int x = position.x - 1; x <= position.x + 1; x++)
+                            {
+                                if (IsInBounds(x, y, currentWidth, currentHeight))
+                                {
+                                    expanded.Add(new Vector2Int(x, y));
+                                }
+                            }
+                        }
+
+                        break;
+                    case SpecialPieceType.ColorClear:
+                        PieceType targetType = piece.Type;
+
+                        for (int y = 0; y < currentHeight; y++)
+                        {
+                            for (int x = 0; x < currentWidth; x++)
+                            {
+                                Piece candidate = pieces[x, y];
+
+                                if (candidate != null && candidate.Type == targetType)
+                                {
+                                    expanded.Add(new Vector2Int(x, y));
+                                }
+                            }
+                        }
+
+                        break;
+                }
+            }
+
+            return expanded;
+        }
+
+        private void HandleLevelEnded()
+        {
+            if (levelEndReported)
+            {
+                return;
+            }
+
+            levelEndReported = true;
+            float sessionSeconds = Mathf.Max(0f, Time.time - levelStartTime);
+            analyticsSink.LevelEnded(CurrentLevelNumber, HasWon, MovesRemaining, CurrentScore, sessionSeconds);
+
+            if (HasWon)
+            {
+                int levelCount = ActiveLevelCatalog != null ? ActiveLevelCatalog.LevelCount : 1;
+                progressService.MarkLevelComplete(currentLevelIndex, levelCount, currentLevel.LevelId, MovesUsed);
+            }
+        }
+
+        private IEnumerator HintRoutine()
+        {
+            hintRoutineRunning = true;
+
+            if (TryFindFirstValidSwap(out Vector2Int from, out Vector2Int to))
+            {
+                Piece first = GetPieceAt(from.x, from.y);
+                Piece second = GetPieceAt(to.x, to.y);
+
+                if (first != null)
+                {
+                    StartCoroutine(first.AnimateHintPulse(0.45f));
+                }
+
+                if (second != null)
+                {
+                    StartCoroutine(second.AnimateHintPulse(0.45f));
+                }
+
+                uiManager.SetStatus("Hint: try the pulsing pair.");
+            }
+
+            yield return new WaitForSeconds(0.6f);
+            lastInputTime = Time.time;
+            hintRoutineRunning = false;
+        }
+
         private void EnsureManagers()
         {
             gameManager = GetComponent<GameManager>();
@@ -831,7 +1136,48 @@ namespace PuzzleDungeon.Gameplay.Match3
                 uiManager = gameObject.AddComponent<UIManager>();
             }
 
+            if (progressService == null)
+            {
+                progressService = new Match3ProgressService(new SaveService());
+            }
+
+            if (analyticsSink == null)
+            {
+                analyticsSink = new NoOpMatch3AnalyticsSink();
+            }
+
             uiManager.Initialize(this, ActiveTheme);
+        }
+
+        private Match3LevelData CreateFallbackLevel()
+        {
+            Match3LevelData fallbackLevel = ScriptableObject.CreateInstance<Match3LevelData>();
+            fallbackLevel.ConfigureForTesting(
+                1,
+                ActiveConfig.Width,
+                ActiveConfig.Height,
+                ActiveConfig.StartingMoves,
+                ActiveConfig.TargetScore,
+                ActiveConfig.GetAvailablePieceTypes().Length,
+                ObjectiveType.Score,
+                null,
+                0);
+            return fallbackLevel;
+        }
+
+        private Vector2Int SelectSpecialCreationPosition(List<MatchResult> matches, Vector2Int firstPreferred, Vector2Int secondPreferred)
+        {
+            if (ContainsMatchAt(matches, firstPreferred))
+            {
+                return firstPreferred;
+            }
+
+            if (ContainsMatchAt(matches, secondPreferred))
+            {
+                return secondPreferred;
+            }
+
+            return matches.Count > 0 && matches[0].MatchedPositions.Count > 0 ? matches[0].MatchedPositions[0] : firstPreferred;
         }
 
         private static void AddShapeMatches(List<MatchResult> results, List<MatchResult> horizontalResults, List<MatchResult> verticalResults)
@@ -882,6 +1228,72 @@ namespace PuzzleDungeon.Gameplay.Match3
         {
             int index = match.MatchedPositions.IndexOf(position);
             return index > 0 && index < match.MatchedPositions.Count - 1;
+        }
+
+        private static bool ContainsMatchAt(IEnumerable<MatchResult> matches, Vector2Int position)
+        {
+            foreach (MatchResult match in matches)
+            {
+                if (match.MatchedPositions.Contains(position))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static SpecialPieceType GetSpecialPieceTypeForMatch(MatchResult match)
+        {
+            if (match.IsTShape || match.IsLShape)
+            {
+                return SpecialPieceType.Bomb;
+            }
+
+            if (match.MatchSize >= 5)
+            {
+                return SpecialPieceType.ColorClear;
+            }
+
+            if (match.MatchSize >= 4)
+            {
+                return match.IsVertical ? SpecialPieceType.LineVertical : SpecialPieceType.LineHorizontal;
+            }
+
+            return SpecialPieceType.None;
+        }
+
+        private static int GetSpecialPriority(SpecialPieceType specialType)
+        {
+            switch (specialType)
+            {
+                case SpecialPieceType.ColorClear:
+                    return 4;
+                case SpecialPieceType.Bomb:
+                    return 3;
+                case SpecialPieceType.LineHorizontal:
+                case SpecialPieceType.LineVertical:
+                    return 2;
+                default:
+                    return 0;
+            }
+        }
+
+        private static string DescribeSpecial(SpecialPieceType specialType)
+        {
+            switch (specialType)
+            {
+                case SpecialPieceType.LineHorizontal:
+                    return "Line!";
+                case SpecialPieceType.LineVertical:
+                    return "Line!";
+                case SpecialPieceType.Bomb:
+                    return "Bomb!";
+                case SpecialPieceType.ColorClear:
+                    return "Color!";
+                default:
+                    return string.Empty;
+            }
         }
 
         private static PieceType PickSafeType(PieceType?[,] board, int x, int y, PieceType[] types, System.Random random)
