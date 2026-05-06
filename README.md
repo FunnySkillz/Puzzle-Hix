@@ -48,10 +48,13 @@ The level ladder lives in `Assets/Resources/Match3LevelCatalog.asset`, which ref
 
 - Full proposal: [docs/project-proposal.md](docs/project-proposal.md)
 - Next-phase notes: [docs/match3-next-phase.md](docs/match3-next-phase.md)
+- Product bible: [docs/product-bible.md](docs/product-bible.md)
+- Production roadmap: [docs/production-roadmap.md](docs/production-roadmap.md)
+- Asset and license register: [docs/asset-license-register.md](docs/asset-license-register.md)
 
 ## Notes
 
-The current MVP is for Unity Editor playtesting only. Android/iOS builds, ads, IAP, SDK analytics, splash screen, blockers, economy, boosters, paid assets, and store polish are still outside this pass. Keep cost at 0 EUR for now: use existing CC0/free art, generated visuals, and procedural or CC0/free audio only.
+The current MVP is for Unity Editor playtesting only. Android/iOS builds, real ads, real IAP, SDK analytics, splash screen, blockers, and store polish are still outside this pass. Keep cost at 0 EUR for now: use existing CC0/free art, generated visuals, and procedural or CC0/free audio only. Production-facing service interfaces now exist so those systems can be added safely behind no-op or mock implementations before any paid or store-facing integration.
 
 ## Validation Checklist (Local)
 
