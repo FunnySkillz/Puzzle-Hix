@@ -15,11 +15,11 @@ MonoBehaviour:
   levelNumber: 17
   width: 8
   height: 8
-  moves: 24
-  targetScore: 1100
+  moves: 26
+  targetScore: 850
   availablePieceTypeCount: 6
   objectiveType: 3
   colorGoals:
   - pieceType: 1
-    targetCount: 12
+    targetCount: 10
   clearPiecesTarget: 0

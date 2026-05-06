@@ -15,9 +15,9 @@ MonoBehaviour:
   levelNumber: 5
   width: 8
   height: 8
-  moves: 25
-  targetScore: 1300
-  availablePieceTypeCount: 6
+  moves: 26
+  targetScore: 1050
+  availablePieceTypeCount: 5
   objectiveType: 0
   colorGoals: []
   clearPiecesTarget: 0

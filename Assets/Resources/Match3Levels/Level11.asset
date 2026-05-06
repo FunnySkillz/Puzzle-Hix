@@ -20,4 +20,4 @@ MonoBehaviour:
   availablePieceTypeCount: 5
   objectiveType: 2
   colorGoals: []
-  clearPiecesTarget: 35
+  clearPiecesTarget: 28
