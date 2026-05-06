@@ -16,6 +16,8 @@ namespace PuzzleDungeon.Gameplay.Match3
         private RectTransform rectTransform;
         private Image image;
         private Text label;
+        private Outline outline;
+        private Shadow shadow;
         private Vector2 dragStartPosition;
         private Vector3 baseScale = Vector3.one;
 
@@ -40,6 +42,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             image.color = color;
             image.raycastTarget = true;
 
+            EnsureVisualEffects(color);
             EnsureLabel();
             label.text = ResolveLabel(pieceType, specialType);
             label.color = Color.white;
@@ -59,6 +62,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             SpecialPieceType = specialType;
             image.sprite = sprite;
             image.color = color;
+            EnsureVisualEffects(color);
             EnsureLabel();
             label.text = ResolveLabel(pieceType, specialType);
         }
@@ -69,6 +73,38 @@ namespace PuzzleDungeon.Gameplay.Match3
             EnsureLabel();
             label.text = ResolveLabel(Type, SpecialPieceType);
             RectTransform rect = RectTransform;
+
+            if (rect != null)
+            {
+                rect.localScale = SpecialPieceType == SpecialPieceType.None ? baseScale : baseScale * 1.08f;
+            }
+        }
+
+        public IEnumerator AnimateSpecialCreated(float duration)
+        {
+            RectTransform rect = RectTransform;
+
+            if (rect == null)
+            {
+                yield break;
+            }
+
+            Vector3 startScale = baseScale;
+            Vector3 peakScale = baseScale * 1.26f;
+            float elapsed = 0f;
+
+            while (elapsed < duration)
+            {
+                if (rect == null)
+                {
+                    yield break;
+                }
+
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / Mathf.Max(0.01f, duration));
+                rect.localScale = Vector3.Lerp(startScale, peakScale, Mathf.Sin(t * Mathf.PI));
+                yield return null;
+            }
 
             if (rect != null)
             {
@@ -124,7 +160,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
         }
 
-        public IEnumerator AnimateClear(float duration)
+        public IEnumerator AnimateClear(float duration, float popScale)
         {
             RectTransform rect = RectTransform;
 
@@ -152,7 +188,15 @@ namespace PuzzleDungeon.Gameplay.Match3
 
                 elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / duration);
-                rect.localScale = Vector3.Lerp(startScale, Vector3.zero, Smooth(t));
+                if (t < 0.35f)
+                {
+                    rect.localScale = Vector3.Lerp(startScale, startScale * popScale, Smooth(t / 0.35f));
+                }
+                else
+                {
+                    rect.localScale = Vector3.Lerp(startScale * popScale, Vector3.zero, Smooth((t - 0.35f) / 0.65f));
+                }
+
                 yield return null;
             }
 
@@ -221,6 +265,12 @@ namespace PuzzleDungeon.Gameplay.Match3
             {
                 rect.localScale = selected ? baseScale * 1.12f : baseScale;
             }
+
+            if (outline != null)
+            {
+                outline.effectColor = selected ? Color.white : new Color(0f, 0f, 0f, 0.42f);
+                outline.effectDistance = selected ? new Vector2(4f, -4f) : new Vector2(2f, -2f);
+            }
         }
 
         public void OnPointerClick(PointerEventData eventData)
@@ -275,6 +325,35 @@ namespace PuzzleDungeon.Gameplay.Match3
             label.raycastTarget = false;
         }
 
+        private void EnsureVisualEffects(Color color)
+        {
+            if (outline == null)
+            {
+                outline = GetComponent<Outline>();
+
+                if (outline == null)
+                {
+                    outline = gameObject.AddComponent<Outline>();
+                }
+            }
+
+            outline.effectColor = new Color(0f, 0f, 0f, 0.42f);
+            outline.effectDistance = new Vector2(2f, -2f);
+
+            if (shadow == null)
+            {
+                shadow = GetComponent<Shadow>();
+
+                if (shadow == null)
+                {
+                    shadow = gameObject.AddComponent<Shadow>();
+                }
+            }
+
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.28f);
+            shadow.effectDistance = new Vector2(4f, -5f);
+        }
+
         private static string ResolveLabel(PieceType pieceType, SpecialPieceType specialType)
         {
             string typeLabel = pieceType.ToString().Substring(0, 1);
@@ -282,13 +361,13 @@ namespace PuzzleDungeon.Gameplay.Match3
             switch (specialType)
             {
                 case SpecialPieceType.LineHorizontal:
-                    return $"{typeLabel}H";
+                    return $"{typeLabel}-";
                 case SpecialPieceType.LineVertical:
-                    return $"{typeLabel}V";
+                    return $"{typeLabel}|";
                 case SpecialPieceType.Bomb:
-                    return $"{typeLabel}B";
+                    return $"{typeLabel}*";
                 case SpecialPieceType.ColorClear:
-                    return $"{typeLabel}C";
+                    return $"{typeLabel}@";
                 default:
                     return typeLabel;
             }

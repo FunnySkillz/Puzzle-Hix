@@ -26,6 +26,11 @@ MonoBehaviour:
   fallDuration: 0.16
   cascadeDelay: 0.08
   hintDelay: 5
+  hintPulseDuration: 0.55
+  specialCreateDuration: 0.18
+  specialActivationPause: 0.08
+  floatingFeedbackDuration: 0.75
+  matchPopScale: 1.16
   redColor: {r: 0.9, g: 0.22, b: 0.2, a: 1}
   blueColor: {r: 0.22, g: 0.5, b: 0.95, a: 1}
   greenColor: {r: 0.28, g: 0.72, b: 0.38, a: 1}

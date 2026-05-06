@@ -23,6 +23,7 @@ namespace PuzzleDungeon.Gameplay.Match3
         public int CurrentLevelNumber => currentLevel != null ? currentLevel.LevelNumber : 1;
         public ObjectiveType ObjectiveType => currentLevel != null ? currentLevel.ObjectiveType : ObjectiveType.Score;
         public int ClearedPieceCount { get; private set; }
+        public int CascadeCount { get; private set; }
         public int ClearPiecesTarget => currentLevel != null ? currentLevel.ClearPiecesTarget : 0;
         public bool IsGameOver { get; private set; }
         public bool HasWon { get; private set; }
@@ -38,6 +39,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             IsGameOver = false;
             HasWon = false;
             ClearedPieceCount = 0;
+            CascadeCount = 0;
             RebuildColorGoals();
             RefreshHud();
             uiManager?.HideEndGame();
@@ -88,6 +90,14 @@ namespace PuzzleDungeon.Gameplay.Match3
             RefreshHud();
         }
 
+        public void RecordCascade()
+        {
+            if (!IsGameOver)
+            {
+                CascadeCount++;
+            }
+        }
+
         public int GetCollectedCount(PieceType pieceType)
         {
             return collectedCounts.TryGetValue(pieceType, out int count) ? count : 0;
@@ -109,7 +119,6 @@ namespace PuzzleDungeon.Gameplay.Match3
             {
                 IsGameOver = true;
                 HasWon = true;
-                uiManager?.ShowEndGame(true);
                 return true;
             }
 
@@ -117,7 +126,6 @@ namespace PuzzleDungeon.Gameplay.Match3
             {
                 IsGameOver = true;
                 HasWon = false;
-                uiManager?.ShowEndGame(false);
                 return true;
             }
 

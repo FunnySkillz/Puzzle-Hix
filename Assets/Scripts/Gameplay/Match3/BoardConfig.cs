@@ -30,6 +30,11 @@ namespace PuzzleDungeon.Gameplay.Match3
         [SerializeField] private float fallDuration = 0.16f;
         [SerializeField] private float cascadeDelay = 0.08f;
         [SerializeField] private float hintDelay = 5f;
+        [SerializeField] private float hintPulseDuration = 0.55f;
+        [SerializeField] private float specialCreateDuration = 0.18f;
+        [SerializeField] private float specialActivationPause = 0.08f;
+        [SerializeField] private float floatingFeedbackDuration = 0.75f;
+        [SerializeField] private float matchPopScale = 1.16f;
 
         [Header("Piece Colors")]
         [SerializeField] private Color redColor = new Color(0.90f, 0.22f, 0.20f, 1f);
@@ -52,6 +57,11 @@ namespace PuzzleDungeon.Gameplay.Match3
         public float FallDuration => Mathf.Max(0f, fallDuration);
         public float CascadeDelay => Mathf.Max(0f, cascadeDelay);
         public float HintDelay => Mathf.Max(1f, hintDelay);
+        public float HintPulseDuration => Mathf.Max(0.1f, hintPulseDuration);
+        public float SpecialCreateDuration => Mathf.Max(0f, specialCreateDuration);
+        public float SpecialActivationPause => Mathf.Max(0f, specialActivationPause);
+        public float FloatingFeedbackDuration => Mathf.Max(0.1f, floatingFeedbackDuration);
+        public float MatchPopScale => Mathf.Max(1f, matchPopScale);
 
         public PieceType[] GetAvailablePieceTypes()
         {

@@ -14,7 +14,7 @@ namespace PuzzleDungeon.Gameplay.Match3
     [DisallowMultipleComponent]
     public class BoardManager : MonoBehaviour
     {
-        private const string MainMenuSceneName = "MainMenu";
+        private const string LevelMapSceneName = "LevelMap";
 
         [SerializeField] private BoardConfig config;
         [SerializeField] private PrototypeTheme theme;
@@ -25,6 +25,7 @@ namespace PuzzleDungeon.Gameplay.Match3
         private Transform boardRoot;
         private GameManager gameManager;
         private UIManager uiManager;
+        private AudioService audioService;
         private Match3ProgressService progressService;
         private IMatch3AnalyticsSink analyticsSink;
         private Match3LevelData currentLevel;
@@ -41,6 +42,7 @@ namespace PuzzleDungeon.Gameplay.Match3
         public int CurrentScore => gameManager != null ? gameManager.Score : 0;
         public int MovesRemaining => gameManager != null ? gameManager.MovesRemaining : 0;
         public int MovesUsed => gameManager != null ? gameManager.MovesUsed : 0;
+        public int CascadeCount => gameManager != null ? gameManager.CascadeCount : 0;
         public int TargetScore => gameManager != null ? gameManager.TargetScore : 0;
         public int CurrentLevelIndex => currentLevelIndex;
         public int CurrentLevelNumber => currentLevel != null ? currentLevel.LevelNumber : 1;
@@ -48,6 +50,7 @@ namespace PuzzleDungeon.Gameplay.Match3
         public bool IsGameOver => gameManager != null && gameManager.IsGameOver;
         public bool HasWon => gameManager != null && gameManager.HasWon;
         public bool HasNextLevel => ActiveLevelCatalog != null && currentLevelIndex + 1 < ActiveLevelCatalog.LevelCount;
+        public LevelResult LastLevelResult { get; private set; }
 
         private BoardConfig ActiveConfig
         {
@@ -138,7 +141,12 @@ namespace PuzzleDungeon.Gameplay.Match3
 
         public void ReturnToMenu()
         {
-            SceneManager.LoadScene(MainMenuSceneName);
+            SceneManager.LoadScene(LevelMapSceneName);
+        }
+
+        public void PlayButtonClick()
+        {
+            audioService?.Play(AudioCue.ButtonClick);
         }
 
         public void HandlePieceClicked(Piece piece)
@@ -287,6 +295,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             selectedPiece = null;
             inputBlocked = false;
             levelEndReported = false;
+            LastLevelResult = null;
             levelStartTime = Time.time;
             lastInputTime = Time.time;
             gameManager.Initialize(currentLevel, ActiveConfig, uiManager);
@@ -303,6 +312,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             selectedPiece = null;
             inputBlocked = false;
             levelEndReported = false;
+            LastLevelResult = null;
             levelStartTime = Time.time;
             lastInputTime = Time.time;
             gameManager.Initialize(currentLevel, ActiveConfig, uiManager);
@@ -656,6 +666,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             gameManager.Initialize(currentLevel, ActiveConfig, uiManager);
             uiManager.SetStatus($"Level {currentLevel.LevelNumber}: make smart swaps.");
             analyticsSink.LevelStarted(CurrentLevelNumber, CurrentObjectiveType, MovesRemaining);
+            LastLevelResult = null;
         }
 
         private IEnumerator AttemptSwapRoutine(Piece first, Piece second)
@@ -666,6 +677,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             Vector2Int firstStart = new Vector2Int(first.GridX, first.GridY);
             Vector2Int secondStart = new Vector2Int(second.GridX, second.GridY);
 
+            audioService.Play(AudioCue.Swap);
             yield return SwapPieces(first, second, ActiveConfig.SwapDuration);
 
             List<MatchResult> matches = FindMatches(ToTypeBoard());
@@ -673,6 +685,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             if (matches.Count == 0 || (!ContainsMatchAt(matches, firstStart) && !ContainsMatchAt(matches, secondStart)))
             {
                 uiManager.SetStatus("No match. Try another swap.");
+                audioService.Play(AudioCue.InvalidSwap);
                 Vector2 offset = new Vector2(secondStart.x - firstStart.x, secondStart.y - firstStart.y) * 14f;
                 StartCoroutine(first.AnimateInvalidBounce(-offset, ActiveConfig.InvalidSwapDuration));
                 StartCoroutine(second.AnimateInvalidBounce(offset, ActiveConfig.InvalidSwapDuration));
@@ -699,7 +712,8 @@ namespace PuzzleDungeon.Gameplay.Match3
 
             if (ended)
             {
-                HandleLevelEnded();
+                LevelResult result = HandleLevelEnded();
+                uiManager.ShowEndGame(HasWon, result);
             }
 
             inputBlocked = gameManager.IsGameOver;
@@ -715,14 +729,31 @@ namespace PuzzleDungeon.Gameplay.Match3
             while (matches.Count > 0)
             {
                 HashSet<Vector2Int> matchedPositions = CollectMatchedPositions(matches);
-                HashSet<Vector2Int> expandedPositions = ExpandMatchedPositionsForSpecials(matchedPositions);
+                HashSet<Vector2Int> expandedPositions = ExpandMatchedPositionsForSpecials(matchedPositions, out bool activatedSpecial);
+
+                if (multiplier > 1)
+                {
+                    gameManager.RecordCascade();
+                    audioService.Play(AudioCue.Cascade);
+                }
+
+                if (activatedSpecial)
+                {
+                    audioService.Play(AudioCue.SpecialActivate);
+
+                    if (ActiveConfig.SpecialActivationPause > 0f)
+                    {
+                        yield return new WaitForSeconds(ActiveConfig.SpecialActivationPause);
+                    }
+                }
+
                 List<PieceType> clearedTypes = new List<PieceType>();
                 yield return ClearMatchedPieces(expandedPositions, canCreateSpecial ? specialPosition : (Vector2Int?)null, createdSpecialType, clearedTypes);
 
                 int scoreGain = clearedTypes.Count * 10 * multiplier;
                 gameManager.RecordClearedPieces(clearedTypes, scoreGain);
                 uiManager.SetStatus(multiplier == 1 ? $"Match! +{scoreGain}" : $"Cascade x{multiplier}! +{scoreGain}");
-                uiManager.ShowFloatingFeedback(multiplier == 1 ? $"+{scoreGain}" : $"x{multiplier} +{scoreGain}", Vector2.zero, Color.white);
+                uiManager.ShowFloatingFeedback(multiplier == 1 ? $"+{scoreGain}" : $"x{multiplier} +{scoreGain}", Vector2.zero, Color.white, ActiveConfig.FloatingFeedbackDuration);
 
                 yield return ApplyGravityAndSpawn();
 
@@ -753,7 +784,9 @@ namespace PuzzleDungeon.Gameplay.Match3
                 if (specialCreationPosition.HasValue && position == specialCreationPosition.Value && createdSpecialType != SpecialPieceType.None)
                 {
                     piece.SetSpecialPieceType(createdSpecialType);
-                    uiManager.ShowFloatingFeedback(DescribeSpecial(createdSpecialType), GetCanvasPosition(piece), Color.yellow);
+                    audioService.Play(AudioCue.SpecialCreate);
+                    uiManager.ShowFloatingFeedback(DescribeSpecial(createdSpecialType), GetCanvasPosition(piece), Color.yellow, ActiveConfig.FloatingFeedbackDuration);
+                    StartCoroutine(piece.AnimateSpecialCreated(ActiveConfig.SpecialCreateDuration));
                     continue;
                 }
 
@@ -761,7 +794,12 @@ namespace PuzzleDungeon.Gameplay.Match3
                 clearedTypes.Add(piece.Type);
                 clearingPieces.Add(piece);
                 uiManager.ShowPieceBurst(GetCanvasPosition(piece), ActiveConfig.GetPieceColor(piece.Type));
-                StartCoroutine(piece.AnimateClear(ActiveConfig.ClearDuration));
+                StartCoroutine(piece.AnimateClear(ActiveConfig.ClearDuration, ActiveConfig.MatchPopScale));
+            }
+
+            if (clearingPieces.Count > 0)
+            {
+                audioService.Play(AudioCue.MatchClear);
             }
 
             if (ActiveConfig.ClearDuration > 0f)
@@ -1010,9 +1048,10 @@ namespace PuzzleDungeon.Gameplay.Match3
             return board;
         }
 
-        private HashSet<Vector2Int> ExpandMatchedPositionsForSpecials(HashSet<Vector2Int> matchedPositions)
+        private HashSet<Vector2Int> ExpandMatchedPositionsForSpecials(HashSet<Vector2Int> matchedPositions, out bool activatedSpecial)
         {
             HashSet<Vector2Int> expanded = new HashSet<Vector2Int>(matchedPositions);
+            activatedSpecial = false;
 
             foreach (Vector2Int position in matchedPositions)
             {
@@ -1026,6 +1065,8 @@ namespace PuzzleDungeon.Gameplay.Match3
                 switch (piece.SpecialPieceType)
                 {
                     case SpecialPieceType.LineHorizontal:
+                        activatedSpecial = true;
+                        uiManager.ShowFloatingFeedback("Row clear!", GetCanvasPosition(piece), Color.yellow, ActiveConfig.FloatingFeedbackDuration);
                         for (int x = 0; x < currentWidth; x++)
                         {
                             expanded.Add(new Vector2Int(x, position.y));
@@ -1033,6 +1074,8 @@ namespace PuzzleDungeon.Gameplay.Match3
 
                         break;
                     case SpecialPieceType.LineVertical:
+                        activatedSpecial = true;
+                        uiManager.ShowFloatingFeedback("Column clear!", GetCanvasPosition(piece), Color.yellow, ActiveConfig.FloatingFeedbackDuration);
                         for (int y = 0; y < currentHeight; y++)
                         {
                             expanded.Add(new Vector2Int(position.x, y));
@@ -1040,6 +1083,8 @@ namespace PuzzleDungeon.Gameplay.Match3
 
                         break;
                     case SpecialPieceType.Bomb:
+                        activatedSpecial = true;
+                        uiManager.ShowFloatingFeedback("Burst!", GetCanvasPosition(piece), Color.yellow, ActiveConfig.FloatingFeedbackDuration);
                         for (int y = position.y - 1; y <= position.y + 1; y++)
                         {
                             for (int x = position.x - 1; x <= position.x + 1; x++)
@@ -1053,6 +1098,8 @@ namespace PuzzleDungeon.Gameplay.Match3
 
                         break;
                     case SpecialPieceType.ColorClear:
+                        activatedSpecial = true;
+                        uiManager.ShowFloatingFeedback("Color clear!", GetCanvasPosition(piece), Color.yellow, ActiveConfig.FloatingFeedbackDuration);
                         PieceType targetType = piece.Type;
 
                         for (int y = 0; y < currentHeight; y++)
@@ -1075,11 +1122,11 @@ namespace PuzzleDungeon.Gameplay.Match3
             return expanded;
         }
 
-        private void HandleLevelEnded()
+        private LevelResult HandleLevelEnded()
         {
             if (levelEndReported)
             {
-                return;
+                return LastLevelResult;
             }
 
             levelEndReported = true;
@@ -1089,8 +1136,16 @@ namespace PuzzleDungeon.Gameplay.Match3
             if (HasWon)
             {
                 int levelCount = ActiveLevelCatalog != null ? ActiveLevelCatalog.LevelCount : 1;
-                progressService.MarkLevelComplete(currentLevelIndex, levelCount, currentLevel.LevelId, MovesUsed);
+                LastLevelResult = progressService.CompleteLevel(currentLevel, currentLevelIndex, levelCount, CurrentScore, MovesRemaining, MovesUsed, CascadeCount);
+                audioService.Play(AudioCue.Win);
             }
+            else
+            {
+                LastLevelResult = progressService.CreateLossResult(currentLevel, CurrentScore, MovesRemaining, MovesUsed, CascadeCount);
+                audioService.Play(AudioCue.Fail);
+            }
+
+            return LastLevelResult;
         }
 
         private IEnumerator HintRoutine()
@@ -1104,12 +1159,12 @@ namespace PuzzleDungeon.Gameplay.Match3
 
                 if (first != null)
                 {
-                    StartCoroutine(first.AnimateHintPulse(0.45f));
+                    StartCoroutine(first.AnimateHintPulse(ActiveConfig.HintPulseDuration));
                 }
 
                 if (second != null)
                 {
-                    StartCoroutine(second.AnimateHintPulse(0.45f));
+                    StartCoroutine(second.AnimateHintPulse(ActiveConfig.HintPulseDuration));
                 }
 
                 uiManager.SetStatus("Hint: try the pulsing pair.");
@@ -1139,6 +1194,11 @@ namespace PuzzleDungeon.Gameplay.Match3
             if (progressService == null)
             {
                 progressService = new Match3ProgressService(new SaveService());
+            }
+
+            if (audioService == null)
+            {
+                audioService = AudioService.GetOrCreate();
             }
 
             if (analyticsSink == null)

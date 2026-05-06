@@ -4,7 +4,6 @@ using PuzzleDungeon.UI;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
-using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace PuzzleDungeon.Gameplay.Match3
@@ -15,8 +14,6 @@ namespace PuzzleDungeon.Gameplay.Match3
     [DisallowMultipleComponent]
     public class UIManager : MonoBehaviour
     {
-        private const string MainMenuSceneName = "MainMenu";
-
         private PrototypeTheme theme;
         private BoardManager boardManager;
         private Canvas canvas;
@@ -29,6 +26,8 @@ namespace PuzzleDungeon.Gameplay.Match3
         private GameObject endGamePanel;
         private GameObject nextButtonObject;
         private Text endGameTitleText;
+        private Text endGameStarsText;
+        private Text endGameSummaryText;
 
         public Transform CanvasTransform => canvas != null ? canvas.transform : null;
 
@@ -80,13 +79,20 @@ namespace PuzzleDungeon.Gameplay.Match3
 
         public void ShowEndGame(bool won)
         {
+            ShowEndGame(won, null);
+        }
+
+        public void ShowEndGame(bool won, LevelResult result)
+        {
             if (endGamePanel == null)
             {
                 return;
             }
 
             endGamePanel.SetActive(true);
+            endGamePanel.transform.localScale = Vector3.zero;
             endGameTitleText.text = won ? "Level Complete" : "Game Over";
+            UpdateEndGameSummary(won, result);
 
             if (nextButtonObject != null)
             {
@@ -94,6 +100,7 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
 
             SetStatus(won ? "Objective complete." : "No moves left.");
+            StartCoroutine(ScalePanelIn(endGamePanel.transform));
         }
 
         public void HideEndGame()
@@ -104,9 +111,9 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
         }
 
-        public void ShowFloatingFeedback(string message, Vector2 anchoredPosition, Color color)
+        public void ShowFloatingFeedback(string message, Vector2 anchoredPosition, Color color, float duration = 0.75f)
         {
-            StartCoroutine(FloatingFeedbackRoutine(message, anchoredPosition, color));
+            StartCoroutine(FloatingFeedbackRoutine(message, anchoredPosition, color, duration));
         }
 
         public void ShowPieceBurst(Vector2 anchoredPosition, Color color)
@@ -253,12 +260,15 @@ namespace PuzzleDungeon.Gameplay.Match3
             image.sprite = theme != null ? theme.PanelSprite : null;
             image.color = theme != null ? theme.PanelColor : new Color(0f, 0f, 0f, 0.86f);
 
-            endGameTitleText = CreateCenteredText(panelObject.transform, "EndGameTitle", "Level Complete", new Vector2(0f, 76f), new Vector2(720f, 72f), 44);
+            endGameTitleText = CreateCenteredText(panelObject.transform, "EndGameTitle", "Level Complete", new Vector2(0f, 118f), new Vector2(720f, 64f), 42);
             endGameTitleText.fontStyle = FontStyle.Bold;
+            endGameStarsText = CreateCenteredText(panelObject.transform, "EndGameStars", "", new Vector2(0f, 50f), new Vector2(720f, 48f), 34);
+            endGameStarsText.fontStyle = FontStyle.Bold;
+            endGameSummaryText = CreateCenteredText(panelObject.transform, "EndGameSummary", "", new Vector2(0f, -10f), new Vector2(720f, 82f), 24);
 
-            CreateButton(panelObject.transform, "RetryButton", "Retry", new Vector2(-225f, -88f), theme != null ? theme.RetryIconSprite : null, () => boardManager.RetryCurrentLevel());
-            nextButtonObject = CreateButton(panelObject.transform, "NextButton", "Next", new Vector2(0f, -88f), theme != null ? theme.NextIconSprite : null, () => boardManager.GoToNextLevel());
-            CreateButton(panelObject.transform, "MenuButton", "Menu", new Vector2(225f, -88f), theme != null ? theme.MenuIconSprite : null, () => SceneManager.LoadScene(MainMenuSceneName));
+            CreateButton(panelObject.transform, "RetryButton", "Retry", new Vector2(-225f, -130f), theme != null ? theme.RetryIconSprite : null, () => boardManager.RetryCurrentLevel());
+            nextButtonObject = CreateButton(panelObject.transform, "NextButton", "Next", new Vector2(0f, -130f), theme != null ? theme.NextIconSprite : null, () => boardManager.GoToNextLevel());
+            CreateButton(panelObject.transform, "MenuButton", "Map", new Vector2(225f, -130f), theme != null ? theme.MenuIconSprite : null, () => boardManager.ReturnToMenu());
 
             panelObject.SetActive(false);
             return panelObject;
@@ -304,7 +314,11 @@ namespace PuzzleDungeon.Gameplay.Match3
 
             Button button = buttonObject.GetComponent<Button>();
             button.targetGraphic = image;
-            button.onClick.AddListener(() => onPressed?.Invoke());
+            button.onClick.AddListener(() =>
+            {
+                boardManager?.PlayButtonClick();
+                onPressed?.Invoke();
+            });
 
             if (iconSprite != null)
             {
@@ -334,14 +348,13 @@ namespace PuzzleDungeon.Gameplay.Match3
             image.raycastTarget = false;
         }
 
-        private IEnumerator FloatingFeedbackRoutine(string message, Vector2 anchoredPosition, Color color)
+        private IEnumerator FloatingFeedbackRoutine(string message, Vector2 anchoredPosition, Color color, float duration)
         {
             Text text = CreateCenteredText(canvas.transform, "FloatingFeedback", message, anchoredPosition, new Vector2(260f, 56f), 30);
             text.fontStyle = FontStyle.Bold;
             text.color = color;
 
             RectTransform rect = text.GetComponent<RectTransform>();
-            float duration = 0.75f;
             float elapsed = 0f;
 
             while (elapsed < duration)
@@ -356,6 +369,64 @@ namespace PuzzleDungeon.Gameplay.Match3
             }
 
             Destroy(text.gameObject);
+        }
+
+        private void UpdateEndGameSummary(bool won, LevelResult result)
+        {
+            if (endGameStarsText != null)
+            {
+                endGameStarsText.text = won && result != null ? BuildStarText(result.Stars) : "---";
+                endGameStarsText.color = won ? new Color(1f, 0.84f, 0.28f, 1f) : Color.white;
+            }
+
+            if (endGameSummaryText == null)
+            {
+                return;
+            }
+
+            if (won && result != null)
+            {
+                endGameSummaryText.text = $"Score {result.Score}  |  Moves left {result.MovesRemaining}\nXP +{result.XpAwarded}  |  Best stars {result.Stars}/3";
+            }
+            else
+            {
+                endGameSummaryText.text = "Objective not complete.\nRetry the level or return to the map.";
+            }
+        }
+
+        private static string BuildStarText(int stars)
+        {
+            int clampedStars = Mathf.Clamp(stars, 0, 3);
+            return new string('*', clampedStars) + new string('-', 3 - clampedStars);
+        }
+
+        private static IEnumerator ScalePanelIn(Transform panelTransform)
+        {
+            if (panelTransform == null)
+            {
+                yield break;
+            }
+
+            float duration = 0.18f;
+            float elapsed = 0f;
+
+            while (elapsed < duration)
+            {
+                if (panelTransform == null)
+                {
+                    yield break;
+                }
+
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                panelTransform.localScale = Vector3.Lerp(Vector3.zero, Vector3.one, t * t * (3f - (2f * t)));
+                yield return null;
+            }
+
+            if (panelTransform != null)
+            {
+                panelTransform.localScale = Vector3.one;
+            }
         }
 
         private IEnumerator BurstDotRoutine(Vector2 anchoredPosition, Vector2 direction, Color color)

@@ -3,6 +3,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using PuzzleDungeon.Services;
 
 namespace PuzzleDungeon.UI
 {
@@ -12,7 +13,7 @@ namespace PuzzleDungeon.UI
     [DisallowMultipleComponent]
     public class MainMenuController : MonoBehaviour
     {
-        private const string GameplaySceneName = "PuzzleBoard";
+        private const string LevelMapSceneName = "LevelMap";
 
         [SerializeField] private PrototypeTheme theme;
 
@@ -36,11 +37,11 @@ namespace PuzzleDungeon.UI
         }
 
         /// <summary>
-        /// Loads the playable puzzle board scene.
+        /// Loads the level map scene.
         /// </summary>
         public void OnStartGame()
         {
-            SceneManager.LoadScene(GameplaySceneName);
+            SceneManager.LoadScene(LevelMapSceneName);
         }
 
         /// <summary>
@@ -96,7 +97,7 @@ namespace PuzzleDungeon.UI
 
             CreateBackground(canvas.transform);
             CreateTitle(canvas.transform, "PuzzleDungeon");
-            CreateButton(canvas.transform, "StartButton", "Start Game", new Vector2(0f, -70f), ActiveTheme != null ? ActiveTheme.PlayIconSprite : null, OnStartGame);
+            CreateButton(canvas.transform, "StartButton", "Level Map", new Vector2(0f, -70f), ActiveTheme != null ? ActiveTheme.PlayIconSprite : null, OnStartGame);
             CreateButton(canvas.transform, "QuitButton", "Quit", new Vector2(0f, -162f), ActiveTheme != null ? ActiveTheme.MenuIconSprite : null, OnQuitPressed);
         }
 
@@ -156,7 +157,11 @@ namespace PuzzleDungeon.UI
 
             Button button = buttonObject.GetComponent<Button>();
             button.targetGraphic = buttonImage;
-            button.onClick.AddListener(onPressed);
+            button.onClick.AddListener(() =>
+            {
+                AudioService.PlayGlobal(AudioCue.ButtonClick);
+                onPressed?.Invoke();
+            });
 
             if (iconSprite != null)
             {
